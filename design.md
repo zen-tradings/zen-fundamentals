@@ -9,18 +9,23 @@
 A market-research agent that turns market-data signals and user requests into
 research reports / newsletters, delivered per-user via customer.io.
 
-Two things trigger work:
+Work is *steered* by users and *triggered* by the market:
 
-1. **User requests** — a user (via the voice agent intake) asks a research
-   question ("what's driving the move in semis this week?").
+1. **User directives** — what comes back from the voice agent is **not a
+   question expecting an instant reply**, but general direction: interests,
+   focus areas, constraints ("watch AI semis and rates; less crypto"). A
+   directive steers all subsequent research and can be updated at any time;
+   changes apply from the next job onward (see §4, *User directives*).
 2. **Market signals** — the signal-monitoring pipeline detects something
-   noteworthy (price move, volume spike, news event) and automatically spawns
-   research for users subscribed to that signal.
+   noteworthy (price move, volume spike, news event) and spawns research for
+   users whose directives match that signal.
+3. **Schedules** — recurring digests/reports at each user's cadence.
 
-**Success looks like:** multiple users can fire multiple concurrent requests;
-each gets a well-researched, personalized report; nothing is lost on a crash;
-and we can observe both *system health* (latency, cost, failures) and *result
-quality* (was the report actually good?).
+**Success looks like:** many users each steer their own research direction;
+concurrent signal- and schedule-driven jobs produce reports personalized to
+each user's *current* directive; nothing is lost on a crash; and we can observe
+both *system health* (latency, cost, failures) and *result quality* (was the
+report actually good?).
 
 ### Non-goals (v1)
 
@@ -33,23 +38,31 @@ quality* (was the report actually good?).
 ## 2. High-Level Architecture
 
 ```
- Users (voice agent)          Market data / news feeds
-        │                              │
-        ▼                              ▼
- ┌─────────────┐            ┌──────────────────────┐
- │   Intake    │            │  Signal Detection    │
- │ (auth, user │            │  Pipeline            │
- │  _id, quota)│            │  (rules → LLM class.)│
- └──────┬──────┘            └──────────┬───────────┘
-        │  creates job                 │  creates jobs (per matched user,
-        ▼                              ▼   deduped & coalesced)
- ┌──────────────────────────────────────────────┐
- │              Job Queue (Postgres)            │
- │  research_jobs: status, user_id, priority    │
- └──────────────────┬───────────────────────────┘
-                    │  workers pull (SKIP LOCKED)
-                    ▼
- ┌──────────────────────────────────────────────┐
+ Users (voice agent)              Market data / news feeds
+        │                                  │
+        ▼                                  ▼
+ ┌──────────────┐                ┌──────────────────────┐
+ │    Intake    │                │  Signal Detection    │
+ │ (auth,       │                │  Pipeline            │
+ │  user_id)    │                │  (rules → LLM class.)│
+ └──────┬───────┘                └──────────┬───────────┘
+        │ updates (versioned,               │ signals
+        ▼  append-only)                     ▼
+ ┌──────────────────┐  steers  ┌───────────────────────┐
+ │ User Directives  │─────────▶│  Signal ↔ directive   │
+ │ (per-user state) │          │  matching             │
+ └────────┬─────────┘          └──────────┬────────────┘
+          │ steers                        │ creates jobs (per matched
+          │        Scheduler ──────┐      │  user, deduped & coalesced)
+          │        (cadence)       ▼      ▼
+          │      ┌──────────────────────────────────────┐
+          │      │         Job Queue (Postgres)         │
+          │      │ research_jobs: status, user, priority│
+          │      │  + directive_version snapshot        │
+          │      └──────────────────┬───────────────────┘
+          │                         │  workers pull (SKIP LOCKED)
+          │  steers                 ▼
+ ┌────────▼─────────────────────────────────────┐
  │        Research Agent — worker pool          │
  │  tools: github/code · papers · web search    │
  │  state: per-request ctx │ per-user memory    │
@@ -75,12 +88,16 @@ Every unit of work is a **job** with a stable ID and an owner:
 queued → running → (succeeded | failed | cancelled)
 ```
 
-1. **Create** — intake or signal pipeline inserts a `research_jobs` row
-   (`user_id`, `trigger` = user|signal|scheduled, payload, priority).
+1. **Create** — the signal matcher or scheduler inserts a `research_jobs` row
+   (`user_id`, `trigger` = signal|scheduled|catchup, payload, priority).
+   **Directive updates are not jobs** — intake writes them straight to per-user
+   state (§4); at most, an update enqueues one low-priority *catch-up* job.
 2. **Claim** — a worker claims the oldest eligible job with
-   `SELECT ... FOR UPDATE SKIP LOCKED`, respecting per-user concurrency caps.
+   `SELECT ... FOR UPDATE SKIP LOCKED`, respecting per-user concurrency caps,
+   and snapshots the user's current `directive_version` onto the job.
 3. **Research** — the worker runs the agent loop (tools + LLM) in an isolated
-   per-request context; emits `job_events` at every stage.
+   per-request context, framed by the snapshotted directive; emits
+   `job_events` at every stage.
 4. **Produce** — the content pipeline renders the report, stores it in
    `reports`, and hands it to delivery.
 5. **Deliver** — customer.io sends to the owning user; delivery result recorded.
@@ -91,11 +108,32 @@ lease expired. Every step is idempotent on `job_id`, so retries are safe.
 
 ## 4. Multi-User Architecture
 
+### User directives (the voice-agent contract)
+
+The voice agent's return value is a **directive, not a query**: structured
+interests (symbols, sectors, themes), constraints, and tone/cadence
+preferences, plus the raw transcript. Nothing about it expects an instant
+reply — it steers everything that runs afterward.
+
+- **Versioned, append-only** — each update writes a new `user_directives` row;
+  the latest active version drives signal matching, research framing, and
+  report rendering. History is kept, since users modify direction often.
+- **Snapshot at claim time** — a job records the `directive_version` it ran
+  with; a mid-run directive change never mutates a running job, only
+  subsequent ones.
+- **Changes apply going forward** — the next matched signal or scheduled run
+  uses the new direction. Optionally, a directive change enqueues one
+  low-priority **catch-up job** so the user sees their new focus reflected
+  without waiting for the next signal; several edits in a short window
+  coalesce into a single catch-up.
+- **Watchlists are derived** from the active directive (which symbols/themes
+  to match signals against), not maintained as a separate source of truth.
+
 ### Job queue instead of direct invocation
 
-With many users (and one user firing several requests), intake never runs
-research synchronously — it enqueues. This decouples arrival rate from
-processing rate. **v1 uses Postgres as the queue** (`FOR UPDATE SKIP LOCKED`);
+With many users being matched against a shared signal stream, nothing runs
+research synchronously — signal matches and schedule ticks enqueue. This
+decouples arrival rate from processing rate. **v1 uses Postgres as the queue** (`FOR UPDATE SKIP LOCKED`);
 no Redis/Kafka until scale demands it — one fewer system to operate, and the
 queue is transactional with the rest of our data.
 
@@ -119,15 +157,17 @@ agent code reaches per-user and global state only through a narrow interface
   (the API returns it in `usage`) and roll up per user per day.
 - **Global worker pool cap** sized to our API rate limits; one shared
   rate-limiter in front of LLM and tool calls.
-- **Priority**: user-initiated > signal-initiated > scheduled digests.
+- **Priority**: high-severity signals > routine signal jobs > catch-up jobs >
+  scheduled digests. (Directive updates bypass the queue entirely — they are a
+  state write, cheap and immediate.)
 
 ### Deduplication & coalescing
 
-- User requests: hash of normalized query + time bucket → if an equivalent job
-  completed recently, serve the cached report (marked as such).
-- Signal-initiated: N users subscribed to the same signal share **one** research
-  job; only rendering/personalization fans out per user. Research once, deliver
-  N times.
+- Signal-initiated: N users whose directives match the same signal share
+  **one** research job; only rendering/personalization fans out per user.
+  Research once, deliver N times.
+- Catch-up jobs: several directive edits by the same user in a short window
+  coalesce into one pending catch-up (re-enqueueing replaces, not appends).
 
 ## 5. Data Storage
 
@@ -139,11 +179,15 @@ Core tables (columns abridged):
 
 ```sql
 users           (id, email, prefs jsonb, quota jsonb, created_at)
+user_directives (id, user_id, version, directive jsonb, raw_transcript,
+                 is_active, created_at)   -- append-only; latest active steers
 watchlists      (user_id, symbol, signal_types text[], min_severity)
+                 -- derived/refreshed from the active directive
 
 research_jobs   (id, user_id, trigger, status, priority, payload jsonb,
-                 signal_id, dedup_key, claimed_at, lease_expires_at,
-                 started_at, finished_at, error, token_usage jsonb)
+                 signal_id, directive_version, dedup_key, claimed_at,
+                 lease_expires_at, started_at, finished_at, error,
+                 token_usage jsonb)
 
 signals         (id, source, symbol, type, severity, payload jsonb,
                  dedup_key unique, detected_at)
@@ -225,8 +269,9 @@ replace it later without touching rules or anything downstream.
 
 - **LLM:** Claude API via the Anthropic SDK. Research/writing runs on
   **`claude-opus-4-8`** (adaptive thinking, effort tuned per trigger:
-  `high` for user requests, `medium` for signal-initiated). Signal
-  classification runs on **`claude-haiku-4-5`**. Model IDs live in config.
+  `high` for high-severity signals and catch-up runs, `medium` for routine
+  signal jobs and digests). Signal classification runs on
+  **`claude-haiku-4-5`**. Model IDs live in config.
 - **Agent loop:** the SDK **tool runner** (`client.beta.messages.tool_runner`)
   — we define tools as typed functions, the SDK drives the loop.
 - **Tools** (each a public API per our interface conventions — typed schema,
@@ -278,9 +323,11 @@ The **Result Observation & Evaluation** loop, three inputs written to
    thumbs-up/down links in the report footer.
 
 **Closing the loop:** evaluation scores aggregate per source, per signal type,
-and per prompt version — low-scoring sources get down-weighted in curation,
-and prompt changes are judged against the eval baseline before rollout. Prompt
-versions are recorded on each job so scores are attributable.
+per prompt version, **and per directive version** — low-scoring sources get
+down-weighted in curation, prompt changes are judged against the eval baseline
+before rollout, and a drop in a user's scores right after a directive change
+points at directive interpretation rather than research quality. Prompt and
+directive versions are recorded on each job so scores are attributable.
 
 ## 10. Failure Handling
 
@@ -308,6 +355,7 @@ versions are recorded on each job so scores are attributable.
 
 **v1 (MVP)**
 - [ ] Schema migration for §5 tables (Supabase)
+- [ ] `user_directives` store + intake write path (versioned, append-only)
 - [ ] Job queue + single worker + lease/reaper
 - [ ] Research agent with web-search + fetch tools (tool runner, Opus 4.8)
 - [ ] Rule-based signal poller (prices via IBKR, one RSS source) + Haiku classification
