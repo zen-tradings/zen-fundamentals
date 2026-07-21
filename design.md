@@ -218,7 +218,7 @@ Notes:
   re-summarize.
 - **Knowledge base** entries are embedded (pgvector) for retrieval during
   research; entries carry `source_ref` so reports can cite provenance.
-- Secrets are never stored in these tables; see §9.
+- Secrets are never stored in these tables; see §12.
 
 ## 6. Real-Time Market Signal Detection
 
@@ -343,7 +343,50 @@ directive versions are recorded on each job so scores are attributable.
 - **The queue is the safety net**: nothing is in-memory-only; a full process
   restart loses no accepted work.
 
-## 11. Configuration & Secrets
+## 11. Deployment
+
+### Process topology
+
+Four runtime shapes, deliberately separable even though v1 bundles them:
+
+| Component | Shape | Scaling rule |
+|---|---|---|
+| Intake API | stateless request/response | replicate freely |
+| Signal poller + scheduler | always-on **singleton** | exactly one — two pollers means duplicate candidates and doubled classification spend (Postgres advisory lock as the leader guard) |
+| Worker pool | long-running consumers | scale horizontally, sized against LLM/tool rate limits |
+| Webhook receiver | public HTTPS endpoint (customer.io callbacks) | stateless, tiny |
+
+### v1 shape
+
+- **One containerized process** (asyncio: API + poller + N workers) on a
+  container PaaS (Fly.io / Railway / Render) + managed Supabase. Research jobs
+  run minutes of LLM + tool calls and the poller is always-on — both disqualify
+  serverless (timeouts, no resident state) and don't yet justify K8s/ECS.
+- **Webhook receiver as a Supabase Edge Function** — the one piece that fits
+  serverless well, and it writes straight to `deliveries`.
+- **Deploys are controlled crashes**: on SIGTERM, workers finish or release
+  their lease; the reaper (§3) already makes an ungraceful kill safe, so
+  rollouts need no special choreography. Migrations run before rollout. The
+  poller may skip one interval during a deploy without alarming.
+- **Environments**: dev (`--dry-run`, no sends) and prod; secrets injected per
+  environment (§12), never baked into images.
+
+### Alternatives considered — and when to revisit
+
+- **Managed job platform** (Trigger.dev / Inngest / Temporal): replaces our
+  hand-rolled queue, lease/reaper, retries, concurrency caps, and job tracing
+  with a product. Revisit if queue/worker machinery exceeds ~a week of build
+  effort — the trade is lock-in and losing the transactional-with-our-data
+  queue.
+- **Anthropic Managed Agents** for the worker tier: Anthropic hosts the agent
+  loop/sandbox (per-session traces, scheduled deployments for digests); tools
+  move to MCP/custom-tool form. Revisit if agent hosting or observability
+  becomes the bottleneck rather than job plumbing.
+
+Neither is blocked by the v1 choice — the job abstraction (§3) stays the same
+either way.
+
+## 12. Configuration & Secrets
 
 - Non-secret config (sources, rule thresholds, model IDs, effort levels,
   quotas, polling intervals) in versioned config files.
@@ -351,7 +394,7 @@ directive versions are recorded on each job so scores are attributable.
   Supabase service key) via env / `.env` (git-ignored); `.env.example`
   documents required vars. Secrets never enter prompts, logs, or the DB.
 
-## 12. Roadmap
+## 13. Roadmap
 
 **v1 (MVP)**
 - [ ] Schema migration for §5 tables (Supabase)
@@ -362,6 +405,7 @@ directive versions are recorded on each job so scores are attributable.
 - [ ] Content pipeline with `--dry-run`; customer.io delivery behind a flag
 - [ ] `job_events` tracing + basic SQL metric views
 - [ ] Per-user concurrency cap + daily token budget
+- [ ] Containerized single-process deploy on PaaS + graceful shutdown (§11)
 
 **v2**
 - [ ] LLM-as-judge evaluation pass + engagement webhook ingestion
