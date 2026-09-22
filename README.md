@@ -56,13 +56,21 @@ Streaming via SSE on `/run` for progressive drafts. OpenAPI spec in [`docs/opena
 
 **Source-agnostic with priority.** Every source implements one adapter interface (`discover → fetch → normalize`). Priority, recency window, and trust tier are per-newsletter config. Evidence is ranked before any model sees it.
 
-**Dynamic model routing.** Each role — plan, search, write, audit, translate — is routed at runtime by cost, latency, and quality signals against the newsletter's budget. No fixed model IDs; providers via OpenRouter or direct.
+**Context engineering over prompt engineering.** The writer never sees raw search results. A `TaskContract` freezes intent, a `SearchPlan` fans out queries, and an `EvidenceMatrix` ranks, deduplicates, and quota-limits sources by tier before anything enters a context window. Long runs compact accumulated evidence into structured summaries rather than letting the window grow.
 
-**Continuous loops, not cron.** A newsletter in `continuous` mode keeps a monitor agent alive: diff sources, score novelty, accumulate evidence, and emit an issue when the threshold is met — or on schedule as a fallback.
+**Dynamic model routing.** Each role — plan, search, write, audit, translate — is routed at runtime against a per-model capability profile (reasoning depth, tool-call reliability, long-context stability, truncation behavior) scored against the newsletter's cost and latency budget. Reasoning and output token budgets are separate so reasoning can't starve visible output. No fixed model IDs; providers via OpenRouter or direct.
 
-**Parallel, multi-agent execution.** Search lanes, section writers, and auditors run concurrently; latency is a first-class policy knob alongside cost and evidence quality.
+**Subagent orchestration.** A planner partitions an issue into lanes — search per source, one writer per section, an independent auditor — each with its own budget, timeout, and context. Hand-offs are typed artifacts (`EvidenceMatrix`, `SectionDraft`, `AuditReport`), not chat transcripts; a failed lane is isolated and retried or dropped without restarting the issue.
 
-**Client-aligned eval.** Built-in harness for correctness (labeled cases), auditor trust (defect-injection recall, FN/FP), and value (reader feedback, editor edit distance). Rubrics are per-newsletter.
+**Continuous loops, not cron.** A newsletter in `continuous` mode keeps a monitor agent alive: diff sources, score novelty against prior issues, accumulate evidence, and emit an issue when the threshold is met — or on schedule as a fallback. State persists between cycles.
+
+**Durable execution.** Jobs are leased with heartbeats and fencing tokens so a stalled worker can't commit stale results ([RFC-003](docs/rfc/003-fencing-token-for-job-execution.md)). Research, reporting, delivery, and evaluation have separate lifecycle state machines ([RFC-002](docs/rfc/002-job-lifecycle-state-machine.md)). Delivery goes through an idempotent outbox.
+
+**Safeguards and permissions.** Every API key is scoped to newsletters, connectors, and channels it may touch; agents get tool-level allowlists per lane. Channels are draft-only unless explicitly granted send. Fail-closed gates on templates, credentials, private-network egress, and unsupported claims — an issue that can't pass is held, never degraded silently.
+
+**Client-aligned eval, closed loop.** Built-in harness for correctness (labeled cases), auditor trust (defect-injection recall, FN/FP, kappa), and value (reader feedback, editor edit distance). Rubrics are per-newsletter; results feed back into model routing and skill selection.
+
+**Observability.** Per-call telemetry — model, provider, tokens, reasoning tokens, cost, latency, finish reason — with prompts and completions never logged. Per-issue cost and latency roll up against policy; SLO breaches surface on `/v1/newsletters/:id`.
 
 **Multi-channel.** Channel adapters share one template gate; add a channel by implementing `render → publish → confirm`.
 
@@ -89,7 +97,13 @@ Design lessons draw on [zen-tradings/internal-marketing-agent](https://github.co
 
 ## Status
 
-Early design. See [`docs/`](docs/) for the roadmap.
+Early design. Open RFCs in [`docs/rfc/`](docs/rfc/):
+
+- [001](docs/rfc/001-research-report-separation.md) — shared research layer vs. per-user report layer
+- [002](docs/rfc/002-job-lifecycle-state-machine.md) — separate lifecycle state machines
+- [003](docs/rfc/003-fencing-token-for-job-execution.md) — fencing tokens for leased execution
+
+Planned: subagent orchestration contract, model capability profiles and routing policy, continuous monitor loop spec.
 
 ## License
 
