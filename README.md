@@ -62,6 +62,8 @@ Streaming via SSE on `/run` for progressive drafts. OpenAPI spec in [`docs/opena
 
 **Subagent orchestration.** A planner partitions an issue into lanes — search per source, one writer per section, an independent auditor — each with its own budget, timeout, and context. Hand-offs are typed artifacts (`EvidenceMatrix`, `SectionDraft`, `AuditReport`), not chat transcripts; a failed lane is isolated and retried or dropped without restarting the issue.
 
+**Latency as a policy, not a side effect.** `max_latency_s` is enforced, not advisory. Search lanes fan out per source, sections are written concurrently, and audit overlaps with writing; concurrency limits are per-provider and per-tenant rather than one global cap. Speculative drafts stream over SSE while the audit finishes. When the budget is tight, the planner degrades deliberately — fewer sources, lighter reasoning effort, shorter sections — and records what it dropped. Horizontal scaling comes from leased workers ([RFC-003](docs/rfc/003-fencing-token-for-job-execution.md)), not a bigger box.
+
 **Continuous loops, not cron.** A newsletter in `continuous` mode keeps a monitor agent alive: diff sources, score novelty against prior issues, accumulate evidence, and emit an issue when the threshold is met — or on schedule as a fallback. State persists between cycles.
 
 **Durable execution.** Jobs are leased with heartbeats and fencing tokens so a stalled worker can't commit stale results ([RFC-003](docs/rfc/003-fencing-token-for-job-execution.md)). Research, reporting, delivery, and evaluation have separate lifecycle state machines ([RFC-002](docs/rfc/002-job-lifecycle-state-machine.md)). Delivery goes through an idempotent outbox.
