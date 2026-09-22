@@ -41,9 +41,13 @@ policy:
 ```
 POST   /v1/newsletters              create from config
 GET    /v1/newsletters/:id          status, last issue, monitor state
-POST   /v1/newsletters/:id/run      trigger one issue now
+PUT    /v1/newsletters/:id          revise config; supersedes any unpublished run
+POST   /v1/newsletters/:id/run      trigger one issue now  (?dry_run=true → no publish)
 POST   /v1/newsletters/:id/watch    start / stop the continuous loop
-GET    /v1/issues/:id               issue content, sources, audit report, cost
+GET    /v1/issues/:id               content, sources, trace, audit report, cost
+DELETE /v1/issues/:id               cancel; aborts in-flight work, refuses once publish began
+POST   /v1/issues/:id/answer        resolve a needs_input question
+POST   /v1/issues/:id/approve       release a needs_review issue to channels
 POST   /v1/issues/:id/feedback      reader / editor signal for eval
 GET    /v1/skills  ·  /v1/connectors  ·  /v1/channels
 ```
@@ -63,9 +67,10 @@ Ranked by priority.
 7. **Subagent orchestration.** Lanes with own budget, timeout, and context; typed artifact hand-offs (`EvidenceMatrix`, `SectionDraft`, `AuditReport`); failed lanes isolated, not restarted.
 8. **Durable execution.** Leased workers with fencing tokens ([RFC-003](docs/rfc/003-fencing-token-for-job-execution.md)), separate lifecycle state machines ([RFC-002](docs/rfc/002-job-lifecycle-state-machine.md)), idempotent delivery outbox.
 9. **Closed-loop eval.** Correctness (labeled cases), auditor trust (defect-injection recall, kappa), value (reader feedback, edit distance). Per-newsletter rubrics feed back into routing.
-10. **Safeguards & permissions.** Scoped API keys, per-lane tool allowlists, draft-only by default, fail-closed gates — held, never silently degraded.
-11. **Observability.** Content-free per-call telemetry (model, tokens, cost, latency, finish reason); per-issue SLO rollups on the API.
-12. **Multi-channel.** Adapters implement `render → publish → confirm` behind one template gate.
+10. **Safeguards & permissions.** Scoped API keys, per-lane tool allowlists, draft-only by default, staged audience rollout (`internal → pilot → full`), fail-closed gates — held, never silently degraded.
+11. **Job lifecycle.** Issues move `queued → running → needs_input | needs_review | published | cancelled`. Revising config supersedes the unpublished run; cancel aborts in-flight calls and deletes artifacts but is refused once a channel write starts. Retries survive restarts and honor `Retry-After`; a terminal failure never rewrites a success. Cron runs key on business date with a bounded catch-up window, so restarts neither skip nor double-send. Terminal runs and traces expire by TTL.
+12. **Observability.** Content-free per-call telemetry (model, tokens, cost, latency, finish reason); per-issue SLO rollups on the API.
+13. **Multi-channel.** Adapters implement `render → publish → confirm` behind one template gate.
 
 ## Quick start
 
