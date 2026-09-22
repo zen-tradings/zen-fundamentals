@@ -52,7 +52,7 @@ POST   /v1/issues/:id/feedback      reader / editor signal for eval
 GET    /v1/skills  ·  /v1/connectors  ·  /v1/channels
 ```
 
-Streaming via SSE on `/run` for progressive drafts. OpenAPI spec in [`docs/openapi.yaml`](docs/openapi.yaml).
+Streaming via SSE on `/run` for progressive drafts. OpenAPI spec in [`design/openapi.yaml`](design/openapi.yaml).
 
 ## Design
 
@@ -65,7 +65,7 @@ Ranked by priority.
 5. **Latency as policy.** `max_latency_s` is enforced. Lanes fan out per source and section, audit overlaps writing, drafts stream over SSE. Under budget pressure the planner degrades deliberately and logs what it dropped.
 6. **Dynamic model routing.** Each role routed at runtime against capability profiles (reasoning, tool-call reliability, long-context stability) vs. cost/latency budget. Separate reasoning and output token budgets.
 7. **Subagent orchestration.** Lanes with own budget, timeout, and context; typed artifact hand-offs (`EvidenceMatrix`, `SectionDraft`, `AuditReport`); failed lanes isolated, not restarted.
-8. **Durable execution.** Leased workers with fencing tokens ([RFC-003](docs/rfc/003-fencing-token-for-job-execution.md)), separate lifecycle state machines ([RFC-002](docs/rfc/002-job-lifecycle-state-machine.md)), idempotent delivery outbox.
+8. **Durable execution.** Leased workers with fencing tokens ([RFC-003](design/rfc/003-fencing-token-for-job-execution.md)), separate lifecycle state machines ([RFC-002](design/rfc/002-job-lifecycle-state-machine.md)), idempotent delivery outbox.
 9. **Closed-loop eval.** Correctness (labeled cases), auditor trust (defect-injection recall, kappa), value (reader feedback, edit distance). Per-newsletter rubrics feed back into routing.
 10. **Safeguards & permissions.** Scoped API keys, per-lane tool allowlists, draft-only by default, staged audience rollout (`internal → pilot → full`), fail-closed gates — held, never silently degraded.
 11. **Job lifecycle.** Issues move `queued → running → needs_input | needs_review | published | cancelled`. Revising config supersedes the unpublished run; cancel aborts in-flight calls and deletes artifacts but is refused once a channel write starts. Retries survive restarts and honor `Retry-After`; a terminal failure never rewrites a success. Cron runs key on business date with a bounded catch-up window, so restarts neither skip nor double-send. Terminal runs and traces expire by TTL.
@@ -95,11 +95,11 @@ Design lessons draw on [zen-tradings/internal-marketing-agent](https://github.co
 
 ## Status
 
-Early design. Open RFCs in [`docs/rfc/`](docs/rfc/):
+Early design. Open RFCs in [`design/rfc/`](design/rfc/):
 
-- [001](docs/rfc/001-research-report-separation.md) — shared research layer vs. per-user report layer
-- [002](docs/rfc/002-job-lifecycle-state-machine.md) — separate lifecycle state machines
-- [003](docs/rfc/003-fencing-token-for-job-execution.md) — fencing tokens for leased execution
+- [001](design/rfc/001-research-report-separation.md) — shared research layer vs. per-user report layer
+- [002](design/rfc/002-job-lifecycle-state-machine.md) — separate lifecycle state machines
+- [003](design/rfc/003-fencing-token-for-job-execution.md) — fencing tokens for leased execution
 
 Planned: subagent orchestration contract, model capability profiles and routing policy, continuous monitor loop spec.
 
