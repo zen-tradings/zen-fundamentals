@@ -1,4 +1,4 @@
-# zen-newsletter-agent
+# zen-fundamentals-agent
 
 An open-source, long-running **newsletter agent** exposed as an API. Point it at sources, describe the audience and cadence, pick channels — it continuously monitors, researches, writes, audits, and delivers.
 
