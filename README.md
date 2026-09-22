@@ -54,29 +54,18 @@ Streaming via SSE on `/run` for progressive drafts. OpenAPI spec in [`docs/opena
 
 Ranked by priority.
 
-**Source-agnostic with priority.** Every source implements one adapter interface (`discover → fetch → normalize`). Priority, recency window, and trust tier are per-newsletter config. Evidence is ranked before any model sees it.
-
-**Skills & MCP as the toolset.** Research capabilities are MCP servers or skill packages, not hard-wired code: `web_search`, `data_connector`, `academic_paper` ship by default; add your own. Writing skills are versioned, model-independent, and injected at runtime.
-
-**Context engineering over prompt engineering.** The writer never sees raw search results. A `TaskContract` freezes intent, a `SearchPlan` fans out queries, and an `EvidenceMatrix` ranks, deduplicates, and quota-limits sources by tier before anything enters a context window. Long runs compact accumulated evidence into structured summaries rather than letting the window grow.
-
-**Continuous loops, not cron.** A newsletter in `continuous` mode keeps a monitor agent alive: diff sources, score novelty against prior issues, accumulate evidence, and emit an issue when the threshold is met — or on schedule as a fallback. State persists between cycles.
-
-**Latency as a policy, not a side effect.** `max_latency_s` is enforced, not advisory. Search lanes fan out per source, sections are written concurrently, and audit overlaps with writing; concurrency limits are per-provider and per-tenant rather than one global cap. Speculative drafts stream over SSE while the audit finishes. When the budget is tight, the planner degrades deliberately — fewer sources, lighter reasoning effort, shorter sections — and records what it dropped. Horizontal scaling comes from leased workers ([RFC-003](docs/rfc/003-fencing-token-for-job-execution.md)), not a bigger box.
-
-**Dynamic model routing.** Each role — plan, search, write, audit, translate — is routed at runtime against a per-model capability profile (reasoning depth, tool-call reliability, long-context stability, truncation behavior) scored against the newsletter's cost and latency budget. Reasoning and output token budgets are separate so reasoning can't starve visible output. No fixed model IDs; providers via OpenRouter or direct.
-
-**Subagent orchestration.** A planner partitions an issue into lanes — search per source, one writer per section, an independent auditor — each with its own budget, timeout, and context. Hand-offs are typed artifacts (`EvidenceMatrix`, `SectionDraft`, `AuditReport`), not chat transcripts; a failed lane is isolated and retried or dropped without restarting the issue.
-
-**Durable execution.** Jobs are leased with heartbeats and fencing tokens so a stalled worker can't commit stale results ([RFC-003](docs/rfc/003-fencing-token-for-job-execution.md)). Research, reporting, delivery, and evaluation have separate lifecycle state machines ([RFC-002](docs/rfc/002-job-lifecycle-state-machine.md)). Delivery goes through an idempotent outbox.
-
-**Client-aligned eval, closed loop.** Built-in harness for correctness (labeled cases), auditor trust (defect-injection recall, FN/FP, kappa), and value (reader feedback, editor edit distance). Rubrics are per-newsletter; results feed back into model routing and skill selection.
-
-**Safeguards and permissions.** Every API key is scoped to newsletters, connectors, and channels it may touch; agents get tool-level allowlists per lane. Channels are draft-only unless explicitly granted send. Fail-closed gates on templates, credentials, private-network egress, and unsupported claims — an issue that can't pass is held, never degraded silently.
-
-**Observability.** Per-call telemetry — model, provider, tokens, reasoning tokens, cost, latency, finish reason — with prompts and completions never logged. Per-issue cost and latency roll up against policy; SLO breaches surface on `/v1/newsletters/:id`.
-
-**Multi-channel.** Channel adapters share one template gate; add a channel by implementing `render → publish → confirm`.
+1. **Source-agnostic.** One adapter interface (`discover → fetch → normalize`); priority, recency, and trust tier are config. Evidence is ranked before any model sees it.
+2. **Skills & MCP.** `web_search`, `data_connector`, `academic_paper` ship as MCP servers; writing skills are versioned and model-independent.
+3. **Context engineering.** `TaskContract → SearchPlan → EvidenceMatrix` — the writer sees ranked, deduplicated, quota-limited evidence, never raw results. Long runs compact instead of growing.
+4. **Continuous loops.** A monitor agent diffs sources, scores novelty, and emits an issue on threshold — cron is the fallback.
+5. **Latency as policy.** `max_latency_s` is enforced. Lanes fan out per source and section, audit overlaps writing, drafts stream over SSE. Under budget pressure the planner degrades deliberately and logs what it dropped.
+6. **Dynamic model routing.** Each role routed at runtime against capability profiles (reasoning, tool-call reliability, long-context stability) vs. cost/latency budget. Separate reasoning and output token budgets.
+7. **Subagent orchestration.** Lanes with own budget, timeout, and context; typed artifact hand-offs (`EvidenceMatrix`, `SectionDraft`, `AuditReport`); failed lanes isolated, not restarted.
+8. **Durable execution.** Leased workers with fencing tokens ([RFC-003](docs/rfc/003-fencing-token-for-job-execution.md)), separate lifecycle state machines ([RFC-002](docs/rfc/002-job-lifecycle-state-machine.md)), idempotent delivery outbox.
+9. **Closed-loop eval.** Correctness (labeled cases), auditor trust (defect-injection recall, kappa), value (reader feedback, edit distance). Per-newsletter rubrics feed back into routing.
+10. **Safeguards & permissions.** Scoped API keys, per-lane tool allowlists, draft-only by default, fail-closed gates — held, never silently degraded.
+11. **Observability.** Content-free per-call telemetry (model, tokens, cost, latency, finish reason); per-issue SLO rollups on the API.
+12. **Multi-channel.** Adapters implement `render → publish → confirm` behind one template gate.
 
 ## Quick start
 
