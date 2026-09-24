@@ -24,6 +24,14 @@ Every ThesisVersion has exactly one ReviewPacket, and it is immutable. Its layou
 - `claims[]`: the statements that justify the change (see below);
 - `caused_by[]`: the evidence IDs that triggered re-estimation of this quantity. This comes from the ImpactAssessment and answers "the evidence that caused the change".
 
+**Scenario changes.** For templates with a `scenario_set` quantity (`merger_arb`), the packet shows a scenario table instead of only the headline probability. One row per outcome (`completed_as_announced`, `renegotiated`, `terminated`), with old and new probability, old and new estimated target share price, the deltas, and the claims behind each row. The derived `close_probability` appears beneath the table as a `computed` claim, with the formula shown. A reviewer can then see *why* the headline moved. For example, probability may have moved from "as announced" to "renegotiated" while completion overall held steady.
+
+**Market-implied comparison.** Next to the agent's `close_probability`, the packet shows `market_implied.probability` at the same `clock`, all of its inputs (target close, consideration value, downside price, rate, time to close), and the formula version (RFC-008). A gap larger than the template's `market_gap_flag` (default 0.15, a starting point to be tuned) is listed automatically as an investor judgment item: "Agent and market disagree by X; which view do you hold?" The market figure is context for the reviewer. It is not a claim the agent makes, and it is not audited as one.
+
+**Self-check.** The estimator's self-check result (RFC-005 step 8): each check, pass or fail, whether a revision happened, and what changed in the revision.
+
+**Recoveries.** Every `RecoveryEvent` in this evaluation. A reviewer sees, for example, that an S-4 was extracted by the alternate extractor route after the primary one timed out, and can weight that section accordingly.
+
 **Unchanged quantities.** Listed with `carried_forward: true` or "re-estimated, no change", so a reviewer can see the agent didn't silently skip anything.
 
 **Conflicts.** For each reconciled disagreement: the claims on each side, their evidence, and how the estimator resolved it.

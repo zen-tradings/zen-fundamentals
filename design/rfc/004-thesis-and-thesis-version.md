@@ -48,9 +48,11 @@ sources:
     issuers: ["0000000001", "0000000002"]
   - type: web_search       # secondary
     queries: ["WidgetCo Acme merger antitrust"]
+  - type: market_data      # daily closes, target + acquirer (market-implied baseline only)
+    tickers: [WDGT, ACME]
 policy:
   material_change:          # overrides template defaults (example values)
-    close_probability: { abs: 0.05 }
+    scenarios: { prob_abs: 0.05, price_rel: 0.05 }   # close_probability is derived from scenarios
     expected_close_date: { days: 14 }
   budget_usd_per_evaluation: 1.00   # example value
   max_latency_s: 600               # example value
@@ -75,6 +77,9 @@ A ThesisVersion is an **immutable** snapshot of every tracked quantity at a give
 | `values` | The new value of every tracked quantity, typed by the template |
 | `deltas` | Per-quantity change against the parent: `changed`, the typed delta, and whether it is `material` and which rule fired |
 | `carried_forward` | Quantities not re-estimated in this evaluation, copied from the parent |
+| `market_implied` | Market-implied completion probability at `clock`, with its inputs (RFC-008 §Market-implied probability). Shown next to the agent's estimate. It is **not** a tracked quantity, never triggers the gate, and is not an input to the estimator. |
+| `self_check` | Result of the estimator's pre-emit self-check (RFC-005 step 8) |
+| `recoveries` | Tool or extraction failures in this evaluation and how each was handled: retry, alternate path, or degraded (RFC-005) |
 | `review_packet_id` | Link to the ReviewPacket (RFC-006) |
 | `routing` | The provider and model used for each role |
 | `cost`, `latency` | From content-free telemetry |
@@ -120,6 +125,20 @@ needs_review┼──────────────► rejected   (head un
 ### Thesis status
 
 `active` (being monitored or runnable) → `resolved` (resolution evidence approved; no further evaluations; outcome_audit feedback created) → `archived`. `paused` stops the watch loop but keeps `run` available.
+
+## Feedback
+
+Feedback is structured, typed, and append-only. There are three kinds:
+
+| Kind | Attached to | Payload | Who |
+|---|---|---|---|
+| `user_rating` | version (optionally one quantity or claim) | `rating` (−2..+2), `dimension` (`accuracy | usefulness | citation_quality | packet_clarity`), optional `comment` | reviewer or thesis owner |
+| `outcome_audit` | thesis | `resolution`, `resolution_date`, `scenario_outcome`, `final_conditions`, `realized_price`, plus computed per-version scores using the **RFC-007 §4 metric definitions** and an `eval_case_ref` when the deal is promoted into the replay dataset | created automatically on `resolved` from the resolution evidence, then confirmed by a human |
+| `tool_execution_quality` | evaluation (optionally one call) | `tool_or_route`, `error_class`, `outcome` (`ok | wrong_result | malformed | timeout | recovered | failed`), `details` | emitted automatically from `RecoveryEvent`s (RFC-005); humans can add `wrong_result` reports |
+
+Resolved live theses are post-cutoff for every model already deployed, which makes them the best future source of uncontaminated replay cases. `outcome_audit` records the fields RFC-007 §1.3 needs, so promoting a thesis into the dataset is a copy, not a re-annotation (it still gets second-annotator review).
+
+> Trade-off: fixed feedback kinds are less expressive than free text, but they can be aggregated and fed back into routing and threshold tuning. Free text survives only as the optional `comment`.
 
 ## Mapping to RFC-002 / RFC-003
 

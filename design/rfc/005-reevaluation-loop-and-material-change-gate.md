@@ -17,12 +17,12 @@ The old monitor loop scored "novelty" and published once novelty crossed a thres
 ```
 evidence layer                     judgment layer (per thesis)
 ──────────────                     ────────────────────────────────────────────────────────────────
-ingest ─▶ as_of + tier ─▶ route ─▶ batch ─▶ impact ─▶ extract ─▶ estimate ─▶ audit ─▶ gate ─┬─▶ ThesisVersion (needs_review)
-(adapters)                (by CIK,  (debounce)  (planner) (extractor) (estimator) (auditor)  └─▶ EvaluationRecord (no notify)
-                          form)
+ingest ─▶ as_of + tier ─▶ route ─▶ batch ─▶ impact ─▶ extract ─▶ estimate ─▶ self-check ─▶ audit ─▶ gate ─┬─▶ ThesisVersion (needs_review)
+(adapters)                (by CIK,  (debounce)  (planner) (extractor) (estimator) (estimator   (auditor)  └─▶ EvaluationRecord (no notify)
+                          form)                                                  + code)
 ```
 
-Every step from `impact` onward runs with a fixed `clock` (see *Point-in-time*).
+Every step from `impact` onward runs with a fixed `clock` (see *Point-in-time*). Tool and extraction failures at any step go through *Failure recovery* below.
 
 ### Steps
 
@@ -42,7 +42,7 @@ Every step from `impact` onward runs with a fixed `clock` (see *Point-in-time*).
 
    Evidence that arrives after job creation waits for the next job. Because of this, every live evaluation can later be re-run in replay with the same `clock` and `evidence_set`.
 
-5. **Impact mapping (planner role).** Input: the new evidence, the current head values, and the template's quantity definitions. Output: an `ImpactAssessment` that says, for **each** tracked quantity, `affected: bool` with a short rationale and pointers to evidence spans. Template rules are applied first and can only *add* affected quantities, never remove them. For example, `DEFM14A → {conditions, key_terms, expected_close_date}` and `8-K mentioning "second request" → {conditions, close_probability, expected_close_date}`. Template dependency edges then propagate: if `conditions` is affected, then `close_probability` and `expected_close_date` are too (RFC-008).
+5. **Impact mapping (planner role).** Input: the new evidence, the current head values, and the template's quantity definitions. Output: an `ImpactAssessment` that says, for **each** tracked quantity, `affected: bool` with a short rationale and pointers to evidence spans. Template rules are applied first and can only *add* affected quantities, never remove them. For example, `DEFM14A → {conditions, key_terms, expected_close_date}` and `8-K mentioning "second request" → {conditions, scenarios, expected_close_date}`. Template dependency edges then propagate: if `conditions` is affected, then `scenarios` and `expected_close_date` are too, and `scenarios` always implies the derived `close_probability` (RFC-008).
 
    If nothing is affected, the job ends with an EvaluationRecord (`decision: no_impact`).
 
@@ -52,12 +52,38 @@ Every step from `impact` onward runs with a fixed `clock` (see *Point-in-time*).
 
 7. **Estimate (estimator role).** Re-estimate the affected quantities from the EvidenceMatrix, which is the ranked, deduplicated, quota-limited, point-in-time view of the thesis's evidence (`TaskContract → SearchPlan → EvidenceMatrix`), plus the extractions. The estimator also reconciles conflicting signals (for example a press release and an 8-K that disagree on the expected timing) and records how it resolved them. The estimator lane has **no fetch tools**; it sees only what the EvidenceMatrix gives it.
 
-8. **Audit (auditor role + deterministic checks).** See RFC-006. Summary:
+   `close_probability` is **derived** from the `scenarios` quantity, not estimated separately (RFC-008). The estimator re-estimates scenarios, and code computes `close_probability`.
+
+   The estimator does **not** see market prices or the market-implied probability. Those are computed alongside the estimate and shown to the reviewer (RFC-006).
+
+   > Trade-off: keeping the market signal away from the estimator keeps its view independent. That is what makes "agent vs. market" a meaningful comparison in RFC-007, and it stops the agent from simply echoing the spread. The cost is that the estimator ignores one of the most informative signals a practitioner has. An ablation where the estimator does see market data is planned.
+
+8. **Self-check (estimator role + code).** Before emitting a candidate, the estimator runs an explicit self-check, and the result is recorded in `ThesisVersion.self_check` or `EvaluationRecord.self_check`. The checks are:
+
+   | Check | How |
+   |---|---|
+   | Scenario probabilities sum to 1 (tolerance 1e-6); every probability is in [0, 1] | code |
+   | `close_probability` equals the value derived from scenarios | code |
+   | `expected_close_date ≥ clock`; `expected_close_date ≤` current outside date, or an extension is cited | code |
+   | Key terms reconcile: headline price is consistent with consideration (cash + exchange ratio × reference price, within the collar); the completed-scenario price matches the consideration value | code, with tolerances from the template |
+   | Every changed quantity has ≥ 1 claim with a citation | code |
+   | Every cited `as_of ≤ clock` | code |
+   | Condition statuses agree with scenarios (for example a `failed` regulatory condition alongside a high `completed` probability) and the estimator's own narrative agrees with its numbers | estimator model, one self-review pass |
+
+   On failure the estimator gets **one** revision. After that:
+   - a failed numeric reconciliation (sums, derivation, term arithmetic) means the job **fails** (`self_check_failed`), because a version whose numbers don't add up is not reviewable;
+   - a missing citation means the quantity is flagged uncertain and the audit will block approval;
+   - an `as_of` violation is a hard error, as always;
+   - a model-judged inconsistency means the item is flagged uncertain and listed in the ReviewPacket.
+
+   > Trade-off: several self-checks duplicate deterministic audit checks. We keep both because the self-check runs before the auditor, is cheap, and lets the estimator fix its own mistakes in context. The auditor stays an independent second line. RFC-007 measures each line's catch rate separately.
+
+9. **Audit (auditor role + deterministic checks).** See RFC-006. Summary:
    - deterministic: every cited evidence ID is in `evidence_set`, and every `as_of ≤ clock`;
    - model: does each cited span support its claim, and is each claim's `extracted` / `inferred` label correct.
    If a citation fails, the estimator gets **one** repair attempt. Claims that are still unsupported afterward are kept, marked `unsupported`, and block approval without an override.
 
-9. **Gate.** Compare the candidate against the approved head (RFC-004) using `policy.material_change`, which falls back to template defaults.
+10. **Gate.** Compare the candidate against the approved head (RFC-004) using `policy.material_change`, which falls back to template defaults.
 
 ### Material-change rules
 
@@ -65,7 +91,8 @@ Rules are per quantity type. The shipped defaults are in the `merger_arb` templa
 
 | Quantity type | Material if |
 |---|---|
-| `probability` | `|new − head| ≥ abs` |
+| `probability` | `|new − head| ≥ abs` (for a derived probability, this applies to the derived value) |
+| `scenario_set` | any outcome's probability moves by `≥ prob_abs`, or any outcome's target price moves by `≥ price_rel` (relative), or an outcome is added or removed |
 | `date` | `|new − head| ≥ days` |
 | `condition_list` | any condition added or removed, or any status change in `on:` (default: all status changes) |
 | `key_terms` | any field changes (default), or only the fields listed in `on:` |
@@ -85,7 +112,24 @@ Gate outcomes:
 
 ### EvaluationRecord
 
-This records the evidence and the no-change decision without notifying anyone. Fields: `thesis_id`, `spec_revision`, `clock`, `trigger`, `evidence_set`, `impact_assessment`, `proposed_values` (when estimation ran), `deltas_vs_head`, `decision` (`no_impact | no_change | below_threshold | consistent_with_pending | version_created`), `version_id` (when created), `routing`, `cost`, `latency`. Records are immutable and written in the same fenced transaction as any version.
+This records the evidence and the no-change decision without notifying anyone. Fields: `thesis_id`, `spec_revision`, `clock`, `trigger`, `evidence_set`, `impact_assessment`, `proposed_values` (when estimation ran), `deltas_vs_head`, `decision` (`no_impact | no_change | below_threshold | consistent_with_pending | version_created`), `version_id` (when created), `market_implied`, `self_check`, `recoveries`, `routing`, `cost`, `latency`. Records are immutable and written in the same fenced transaction as any version.
+
+### Failure recovery
+
+Tool and extraction failures are retried or routed to an alternate path, and every failure is recorded as a `RecoveryEvent` in the version or EvaluationRecord (`recoveries[]`). Each event is also emitted as `tool_execution_quality` feedback with no human needed.
+
+| Failure | Retry | Alternate path | If still failing |
+|---|---|---|---|
+| Source fetch: 5xx, timeout, connection reset | exponential backoff, max 4 attempts, honor `Retry-After` | mirror endpoint if the adapter declares one (for example the EDGAR full submission `.txt` instead of the primary HTML document) | the evidence stays invisible; the job continues without it, and the recovery event is recorded (the item will be picked up by a later ingest) |
+| 429 / rate limit | wait for `Retry-After`, counted against `max_latency_s` | none | hold the job (`failed: rate_limited`), retried by the scheduler |
+| Document parse / normalize failure (malformed HTML, broken tables) | 1 | alternate normalizer (text-only, PDF exhibit, XBRL where present) | item stored as `normalize_failed`; not citable |
+| Extractor model: timeout, malformed output, schema violation | 1 with a schema-repair prompt | alternate extractor route (same cost tier, different provider) | quantity marked `extraction_unavailable`, flagged uncertain in the packet; the estimator may still reason from the EvidenceMatrix text, but those claims are `inferred` |
+| Estimator model failure | 1 | alternate estimator route of the same capability tier, if configured | job `failed` (never silently downgraded to a weaker tier) |
+| Auditor unavailable | 1 | alternate auditor route that still satisfies the provider-diversity constraint | job held, fail-closed |
+
+`RecoveryEvent`: `{step, tool_or_route, error_class, attempts, path: retry | alternate:<name> | degraded | failed, outcome: recovered | degraded | failed, latency_ms}`.
+
+> Trade-off: routing to alternates keeps the loop alive through routine outages. But an alternate extractor or normalizer may be less accurate, so every alternate path is marked in the ReviewPacket and a reviewer can discount it. The estimator is never swapped for a weaker tier, because that is where accuracy lives.
 
 ### Point-in-time
 

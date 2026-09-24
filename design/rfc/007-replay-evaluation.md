@@ -100,6 +100,10 @@ Stored in `dataset/cases/<case_id>.json`:
 | `final_conditions[]` | Canonical condition keys (RFC-008 vocabulary) with type and final status. Taken from the definitive proxy / S-4 / offer document, **plus** conditions added later (for example a consent decree or a CFIUS mitigation agreement). |
 | `key_terms_at_signing`, `key_terms_final` | Consideration, per-share price, break fees, outside date (with extensions) |
 | `second_request` | `{present, regime, disclosed_as_of}` |
+| `scenario_outcome` | `completed_as_announced`, `renegotiated` (completed with changed consideration type, per-share price, or exchange ratio vs. signing), or `terminated`. Derived from `resolution` and `key_terms_*`. |
+| `unaffected_date` | Last trading day whose close is before `announcement_as_of`. This is point-in-time safe. `unaffected_date_leak_adjusted` records the earlier date when a later filing (for example the proxy's background section) reveals a leak. It is used only in a diagnostic B1 variant, because it relies on hindsight. |
+| `prices[]` | Daily closes for target and acquirer, from `unaffected_date − 60 trading days` through `resolution_date + 10 trading days` (split- and dividend-adjusted, with the adjustment method recorded) |
+| `realized_price` | Target price under the outcome that happened. Completed: consideration value per share at the closing date. Terminated: target close on the 5th trading day after the termination announcement. |
 | `labels_provenance` | Annotator IDs, adjudication notes |
 
 **Labeling.** `final_conditions` and `key_terms_*` are labeled independently by two annotators following a written guide (`dataset/ANNOTATION.md`, planned). Disagreements are adjudicated by a third. Inter-annotator agreement is reported per field. No agreement figure is assumed in advance.
@@ -110,6 +114,7 @@ The replay feeds a **frozen corpus**, never live sources: every `timeline` and `
 
 - **Secondary web search is disabled in replay.** Historical web pages rarely have a trustworthy `as_of` and are often edited after the fact. The replay therefore measures the primary-source agent only. A live deployment that uses web search is not fully covered by this evaluation; that limitation is stated in every results table.
 - **Amendments** are separate documents with their own `as_of`.
+- **Prices** enter the corpus as `market_data` evidence items, one per ticker per trading day. Each has `as_of` = that session's official close time (16:00 America/New_York; early-close days per the exchange calendar). A filing accepted at 10:00 therefore sees the *previous* day's close. Prices feed only the market-implied computation, never the estimator (RFC-005).
 
 ## 2. Replay harness
 
@@ -175,7 +180,7 @@ Each deal's corpus is transformed into an anonymized twin, stored as a **separat
 | Company names, subsidiaries, brands, products | Consistent placeholders (`TARGET_CO`, `ACQUIRER_CO`, `ACQUIRER_SUB_1`, `PRODUCT_A`) |
 | Tickers, CIKs, CUSIPs, LEIs, addresses, phone numbers, URLs | Placeholders |
 | People (executives, advisors, law firms, banks) | Role placeholders (`TARGET_CEO`, `ACQUIRER_COUNSEL`) |
-| Monetary amounts, share counts, per-share prices | Multiplied by a per-deal secret factor `k ∈ [0.5, 2.0]`. This keeps ratios intact: premium, break fee as a % of equity value, exchange ratios. |
+| Monetary amounts, share counts, per-share prices, daily closes | Multiplied by a per-deal secret factor `k ∈ [0.5, 2.0]`. This keeps ratios intact: premium, break fee as a % of equity value, exchange ratios, spread-implied probability. Target and acquirer closes use the same `k`, so a stock deal's exchange ratio still reconciles. |
 | Dates | Shifted by a per-deal secret offset of whole weeks, which preserves weekdays and all intervals (HSR waiting periods, outside-date spacing) |
 | Sector | Kept at GICS industry-group level (antitrust risk depends on it) |
 | Regulators and statutes | Kept (HSR, EC, CMA, CFIUS). They are needed to reason about conditions. |
@@ -231,6 +236,9 @@ Unless stated otherwise, each deal is weighted equally: a metric is averaged ove
 | **Brier by phase** | Brier at checkpoints bucketed by the fraction of deal life elapsed (0–25%, 25–50%, 50–75%, 75–100%), and at "first checkpoint after second-request disclosure" |
 | **Brier skill score** | `1 − Brier / Brier(base rate)` |
 | **Calibration table** | Pooled checkpoints, bins `[0, .5) [.5, .7) [.7, .85) [.85, .95) [.95, 1]`. Per bin: count of checkpoints, count of deals, mean p, observed completion rate. Uneven bins because estimates cluster high and 40 deals can't fill 10 equal bins. |
+| **Scenario Brier** | Multi-class Brier over the three `scenario_outcome` classes, `Σ_k (p_k − 1[k = outcome])²`, at announcement and over checkpoints |
+| **Scenario price error** | `|price_est(realized outcome) − realized_price| / realized_price`, at announcement and over checkpoints. Median and mean. This scores the agent's price estimate for the outcome that actually happened. |
+| **Market-implied Brier** | Brier of `market_implied.probability` at the same checkpoints (B1 in §5). A paired difference, agent minus market, is reported per row. |
 | **Close-date abs. error (days)** | `|expected_close_date − resolution_date|`, completed deals only. Median and mean, at announcement and over checkpoints, plus signed bias. |
 | **Condition recall** | Share of `final_conditions` keys matched by the agent's `conditions` list, at announcement and at the last scored checkpoint. Matching is by canonical key (RFC-008). `other:*` conditions are matched by an annotator. Condition precision and status accuracy are reported alongside. |
 | **Citation precision** | Share of ReviewPacket claims whose cited evidence supports them. Measured two ways: (a) an **eval judge** on all claims. This is a separate configuration from the pipeline auditor, so the pipeline never grades itself. (b) Humans on a stratified random sample, **target:** ≥ 150 claims per headline configuration, stratified by provenance. Judge–human agreement (Cohen's κ) is reported so readers can see how far to trust (a). |
@@ -239,7 +247,7 @@ Unless stated otherwise, each deal is weighted equally: a metric is averaged ove
 | **Latency per version** | Evaluation job start → commit, wall clock. p50, p90. |
 | **Review load** | Versions per deal, and versions per deal-month |
 
-The same definitions are used for `outcome_audit` feedback on live theses (RFC-008, feedback), so live and replay scores are comparable.
+The same definitions are used for `outcome_audit` feedback on live theses (RFC-004 §Feedback), so live and replay scores are comparable.
 
 ## 5. Baselines and ablations
 
@@ -248,30 +256,118 @@ All configurations run on the same dataset, the same corpus, the same seeds, and
 | ID | Configuration | Changes |
 |---|---|---|
 | B0 | Base rate | `close_probability` = the reference set's completion rate (constant). `expected_close_date` = announcement + the reference set's median announcement-to-close duration. `conditions` = the template default set (`vote:target_shareholders`, `regulatory:hsr`). No model calls. |
+| B1 | Market-implied | `close_probability` = `market_implied.probability` at each checkpoint, computed by the RFC-008 formula from prices with `as_of ≤ clock`. Used for probability metrics only. No model calls. |
 | F | Full system | Production routing (RFC-008) |
 | A1 | Planner/estimator low-cost | Planner and estimator switched to the extractor-tier model; everything else as F |
 | A2 | No auditor | Auditor role and repair loop disabled. Deterministic checks stay (they are code). Citation precision is still measured by the eval judge and humans. |
 | G | Gate off (secondary scoring of F) | No new runs; scores F's proposed values (§2.2) |
 
-B0 needs no contamination split, since it uses no model. It is reported against the same deal subsets as each headline row so the comparison is apples to apples.
+B0 and B1 need no contamination split, since they use no model. B1 uses the point-in-time `unaffected_date`. A diagnostic B1-leak row uses `unaffected_date_leak_adjusted`. That row relies on hindsight and is never compared against the agent as a headline. It is reported against the same deal subsets as each headline row so the comparison is apples to apples.
 
 **Power.** With 40 deals, ≥ 8 of them terminated, and exclusions shrinking the headline subsets further, CIs will be wide. Ablation differences may well not be distinguishable from zero. We report intervals and paired differences, and we make no significance claims beyond them.
 
-## 6. Output
+## 6. Robustness variants
 
-### 6.1 Results table
+These variants reuse the F configuration and the headline subsets (H-named, H-anon). Each noisy or faulty run is **paired** with the clean F run that has the same seed. Their scores are reported as separate rows (`variant` column) and never mixed into clean headline rows.
 
-One table per evaluation run. Each row is one `(configuration, subset)`, and the subsets are `H-named`, `H-anon`, and `pre-cutoff-named (diagnostic)`. The row schema is [`eval-result-row.schema.json`](../schemas/eval-result-row.schema.json).
+### 6.1 Noise robustness (distractor evidence)
 
-| config | subset | n_deals | n_checkpoints | Brier@ann [CI] | Brier@ckpt [CI] | BSS | date MAE@ann (d) | date MAE@ckpt (d) | cond recall@ann | cond recall@last | cite prec (judge) | cite prec (human, n) | κ judge–human | PIT viol. | $/version p50/p90 | latency p50/p90 | versions/deal |
-|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
-| B0 | H-named | | | | | | | | | | — | — | — | 0 | 0 | — | — |
-| F | H-named | | | | | | | | | | | | | | | | |
-| … | | | | | | | | | | | | | | | | | |
+Distractors are injected into the replay event stream at seeded random positions between announcement and resolution. Each distractor gets `as_of` equal to its injection point, so point-in-time rules still hold. The harness knows every distractor ID, but the agent does not.
+
+| Distractor type | Construction | Tier | Target per deal |
+|---|---|---|---|
+| `irrelevant_release` | Real press releases from the target, the acquirer, or a same-industry-group peer, annotated as unrelated to the deal (product launches, personnel changes, unrelated partnerships). Earnings releases are excluded because they can legitimately matter. | primary | ≥ 3 |
+| `stale_redated` | An earlier real evidence item from the same deal (for example the announcement or a past regulatory 8-K), re-packaged as a secondary news item with a new `as_of` and no new facts | secondary | ≥ 2 |
+| `false_rumor` | A synthetic news-style item with a plausible, material, **false** claim: "sources say the DOJ is preparing a suit", "acquirer weighing walking away", "rival bidder circling". Generated from a template with slots filled from the deal, and checked against the ground-truth record to confirm the event never happened. Marked `secondary` with `source.reliability: low`. | secondary | ≥ 2 |
+
+(Per-deal counts are **targets**.)
+
+A distractor is added to a deal only if it doesn't collide with a real event of the same kind within ±7 days. For example, no DOJ-suit rumor is injected within a week of a real DOJ action. Otherwise the ground truth would be ambiguous.
+
+Metrics, per distractor type:
+
+| Metric | Definition |
+|---|---|
+| **Distractor-induced change rate** | Share of distractor events after which the noisy run's head differs **materially** (RFC-005 thresholds) from the paired clean run's head at the same clock. A change is counted only when the next checkpoint's ImpactAssessment or `caused_by` includes the distractor. This rules out ordinary run-to-run variance. |
+| **Distractor-induced drift** | The same comparison with no materiality threshold: the mean absolute difference in `close_probability` and `expected_close_date` vs. clean, over the 3 checkpoints after the distractor |
+| **Distractor citation rate** | Share of ReviewPackets produced after a distractor that cite it. Reported separately as (a) cited *in support of a change* and (b) cited only in `uncertain_items` or `conflicts`. (b) is acceptable behavior for a rumor; (a) is not. |
+| **Noisy − clean Brier** | Paired difference in Brier@checkpoints |
+
+> Trade-off: synthetic rumors test a failure mode that matters, the agent over-reacting to low-trust noise. But the rumors are only as realistic as their template, so a low induced-change rate shows robustness to *our* rumors, not to every rumor. The templates are published with the dataset so others can criticize and extend them.
+
+### 6.2 Self-check catch rate (injected errors)
+
+A mutation hook in the harness alters the estimator's candidate **after** estimation and **before** self-check. The hook is not visible to the model. Each mutated evaluation gets exactly one error, and the clean paired run supplies the reference.
+
+| Error class | Mutation | Expected catcher |
+|---|---|---|
+| `scenario_sum` | Scale one scenario probability so the sum ≠ 1 | self-check (code) |
+| `derivation_mismatch` | Change `close_probability` without changing scenarios | self-check (code) |
+| `term_arithmetic` | Change the headline price so it no longer matches consideration × reference price | self-check (code) |
+| `date_order` | Move `expected_close_date` past the outside date with no extension cited | self-check (code) |
+| `missing_citation` | Remove all citations from one changed quantity | self-check (code) |
+| `future_citation` | Add a citation to a canary document with `as_of > clock` | self-check (code). Recorded as `injected`, and it does **not** count toward §4 PIT violations **provided it is caught before commit**. If it reaches commit, it counts as a real violation. |
+| `wrong_citation` | Swap a citation's `evidence_id` for an unrelated item in the evidence set | self-check (model), then auditor |
+| `status_inconsistency` | Set a regulatory condition to `failed` while leaving `completed_as_announced` probability high | self-check (model) |
+
+Metrics:
+
+- **Self-check catch rate** = errors detected by self-check / errors injected, per class and overall.
+- **Downstream catch rate** = errors the self-check missed but the auditor caught / errors the self-check missed.
+- **Escape rate** = errors that reached a committed version without being flagged / errors injected. Target **0** for the code-checkable classes.
+
+The code-checkable classes are expected to be caught every time. They serve as a regression test of the harness and the checks, not as evidence of model quality. The informative numbers are those for `wrong_citation` and `status_inconsistency`.
+
+### 6.3 Recovery rate (injected tool failures)
+
+A fault-injection layer in the MCP tool proxy and the model router injects failures at seeded points. **Target:** ≥ 1 fault per deal per class in the fault variant.
+
+| Fault class | Injection |
+|---|---|
+| `fetch_5xx` / `fetch_timeout` | Source adapter returns 503 or hangs past its timeout for N attempts (N drawn from {1, 2, 5}, so some faults exceed the retry budget) |
+| `rate_limited` | 429 with `Retry-After` |
+| `malformed_document` | Truncated or corrupted HTML for a filing |
+| `extractor_malformed` | Extractor returns non-schema JSON |
+| `extractor_timeout` | Extractor route times out |
+| `route_outage` | A role's primary provider is unavailable for the whole evaluation |
+
+Metrics:
+
+- **Recovery rate** = faults after which the evaluation completed **and** the resulting head matches the paired clean run within RFC-005 material thresholds / faults injected.
+- **Safe-failure rate** = faults not recovered where the system failed closed (job held or failed, or the quantity was flagged `extraction_unavailable`) / faults not recovered.
+- **Unsafe rate** = faults after which a version was committed that differs materially from clean **without** a recovery or uncertainty flag / faults injected. Target **0**.
+- **Recording completeness** = injected faults that appear as `RecoveryEvent`s / faults injected. Target **1.0**.
+- Added latency and cost per recovered fault, p50 / p90.
+
+## 7. Output
+
+### 7.1 Results table
+
+One table per evaluation run. Each row is one `(configuration, variant, subset)`:
+
+- configurations: B0, B1, F, A1, A2, G;
+- variants: `clean`, `noise`, `injected_errors`, `faults`;
+- subsets: `H-named`, `H-anon`, `pre-cutoff-named (diagnostic)`.
+
+The row schema is [`eval-result-row.schema.json`](../schemas/eval-result-row.schema.json). A column that doesn't apply to a row is `—` (`null` in JSON).
+
+Core columns (every row):
+
+| config | variant | subset | n_deals | n_ckpt | Brier@ann [CI] | Brier@ckpt [CI] | BSS | Δ vs market | scen. Brier | scen. price err | date MAE@ann / @ckpt (d) | cond recall@ann / @last | cite prec judge / human (n) | κ | PIT viol. | $/version p50/p90 | latency p50/p90 | versions/deal |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| B0 | clean | H-named | | | | | | | — | — | | | — | — | 0 | 0 | — | — |
+| B1 | clean | H-named | | | | | | — | — | — | — | — | — | — | 0 | 0 | — | — |
+| F | clean | H-named | | | | | | | | | | | | | | | | |
+| … | | | | | | | | | | | | | | | | | | |
+
+Robustness columns (filled only for variant rows):
+
+| distractor change rate (by type) | distractor citation rate (support / uncertain) | noisy − clean Brier | self-check catch rate (by class) | downstream catch | escape rate | recovery rate | safe-failure | unsafe rate | recording completeness |
+|---|---|---|---|---|---|---|---|---|---|
 
 Calibration tables are attached to each row (`calibration[]` in the row schema).
 
-### 6.2 Exclusions and flags
+### 7.2 Exclusions and flags
 
 `exclusions.csv` has one line per `(case_id, configuration, variant)` with `reason`:
 
@@ -286,6 +382,8 @@ Calibration tables are attached to each row (`calibration[]` in the row schema).
 | `corpus_incomplete` | a filing referenced in labels is missing from the corpus |
 | `run_invalid:pit_violation` | the run was invalidated |
 | `run_failed:<error>` | the harness could not complete the run |
+| `missing_prices` | daily closes are unavailable for part of the window. The deal is excluded from B1 and from scenario price error; other metrics are unaffected. |
+| `distractor_collision` | no collision-free slot for a required distractor type. The deal is excluded from the noise variant. |
 
 `pool_exclusions.csv` (§1.2) lists every candidate dropped before sampling, with its reason.
 

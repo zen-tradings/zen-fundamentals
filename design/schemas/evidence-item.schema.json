@@ -1,0 +1,159 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://raw.githubusercontent.com/zen-tradings/zen-fundamentals/main/design/schemas/evidence-item.schema.json",
+  "title": "EvidenceItem",
+  "description": "An immutable, content-addressed item in the shared evidence layer (RFC-001). One item may be cited by many theses. Point-in-time rule: an item is visible to an estimation step only if as_of <= clock (RFC-005).",
+  "type": "object",
+  "required": ["id", "content_hash", "namespace", "source", "tier", "doc_type", "as_of", "as_of_basis", "as_of_precision", "retrieved_at", "status"],
+  "additionalProperties": false,
+  "properties": {
+    "id": {
+      "type": "string",
+      "pattern": "^ev_[a-z0-9]{16,64}$",
+      "description": "Stable ID derived from namespace + content_hash."
+    },
+    "content_hash": {
+      "type": "string",
+      "pattern": "^sha256:[0-9a-f]{64}$",
+      "description": "Hash of the normalized content."
+    },
+    "namespace": {
+      "type": "string",
+      "pattern": "^(live|replay:[A-Za-z0-9._-]+|anon:[A-Za-z0-9._-]+)$",
+      "description": "live for production; replay:<corpus> for a frozen corpus; anon:<case_id> for an anonymized twin (RFC-007 §3.2). Namespaces never share extraction caches."
+    },
+    "visibility": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "partition": {
+          "type": "string",
+          "pattern": "^(global|tenant:[A-Za-z0-9_-]+)$"
+        }
+      },
+      "required": ["partition"]
+    },
+    "source": {
+      "type": "object",
+      "required": ["adapter"],
+      "additionalProperties": false,
+      "properties": {
+        "adapter": {
+          "type": "string",
+          "description": "Adapter that produced the item.",
+          "examples": ["edgar", "press_release", "web_search", "market_data", "replay_distractor"]
+        },
+        "publisher": { "type": "string" },
+        "url": { "type": "string", "format": "uri" },
+        "accession": {
+          "type": "string",
+          "pattern": "^[0-9]{10}-[0-9]{2}-[0-9]{6}$",
+          "description": "EDGAR accession number, when applicable."
+        },
+        "filer_cik": { "type": "string", "pattern": "^[0-9]{10}$" },
+        "reliability": {
+          "enum": ["high", "normal", "low"],
+          "description": "Adapter-assigned reliability within a tier. False-rumor distractors are secondary + low."
+        }
+      }
+    },
+    "tier": {
+      "enum": ["primary", "secondary"],
+      "description": "Trust tier. Primary: issuer or regulator documents (EDGAR, company press releases) and market prices. Secondary: web and news."
+    },
+    "doc_type": {
+      "type": "string",
+      "description": "Form type or document class.",
+      "examples": ["8-K", "8-K/A", "S-4", "DEFM14A", "PREM14A", "425", "SC TO-T", "SC 14D9", "press_release", "web_article", "price_bar", "rate_observation"]
+    },
+    "form_items": {
+      "type": "array",
+      "items": { "type": "string", "pattern": "^[0-9]+\\.[0-9]{2}$" },
+      "description": "8-K item numbers, e.g. 1.01, 2.01."
+    },
+    "as_of": {
+      "type": "string",
+      "format": "date-time",
+      "description": "Publication or filing timestamp (UTC). Never the retrieval time, unless as_of_basis is retrieved_at."
+    },
+    "as_of_basis": {
+      "enum": ["edgar_acceptance", "wire_timestamp", "dateline_date_eod", "publication_date", "retrieved_at", "session_close", "replay_injection"],
+      "description": "How as_of was determined. dateline_date_eod pins a date-only timestamp to 23:59:59 in the publisher's timezone. replay_injection marks distractors injected by the RFC-007 harness."
+    },
+    "as_of_precision": { "enum": ["exact", "day"] },
+    "retrieved_at": { "type": "string", "format": "date-time" },
+    "entities": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "cik": { "type": "string", "pattern": "^[0-9]{10}$" },
+          "ticker": { "type": "string" },
+          "name": { "type": "string" },
+          "role": { "enum": ["filer", "subject", "mentioned"] }
+        }
+      }
+    },
+    "amends": {
+      "type": ["string", "null"],
+      "pattern": "^ev_[a-z0-9]{16,64}$",
+      "description": "Earlier item this one amends or revises. The earlier item is never edited."
+    },
+    "status": {
+      "enum": ["ok", "normalize_failed"],
+      "description": "normalize_failed items are stored but not citable (RFC-005 failure recovery)."
+    },
+    "normalized": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "text_ref": { "type": "string", "description": "Pointer to normalized text in blob storage." },
+        "mime": { "type": "string" },
+        "bytes": { "type": "integer", "minimum": 0 },
+        "normalizer": { "type": "string", "description": "Normalizer name and version, including alternates." }
+      }
+    },
+    "price": {
+      "type": "object",
+      "description": "Present iff doc_type is price_bar.",
+      "required": ["ticker", "session_date", "close", "currency", "adjustment"],
+      "additionalProperties": false,
+      "properties": {
+        "ticker": { "type": "string" },
+        "session_date": { "type": "string", "format": "date" },
+        "close": { "type": "number", "exclusiveMinimum": 0 },
+        "currency": { "type": "string", "pattern": "^[A-Z]{3}$" },
+        "adjustment": { "enum": ["none", "split", "split_and_dividend"] }
+      }
+    },
+    "observation": {
+      "type": "object",
+      "description": "Present iff doc_type is rate_observation (e.g. 3-month T-bill yield for the market-implied formula, RFC-008).",
+      "required": ["series", "date", "value", "unit"],
+      "additionalProperties": false,
+      "properties": {
+        "series": { "type": "string", "examples": ["DTB3"] },
+        "date": { "type": "string", "format": "date" },
+        "value": { "type": "number" },
+        "unit": { "enum": ["percent_annualized"] }
+      }
+    }
+  },
+  "allOf": [
+    {
+      "if": { "properties": { "doc_type": { "const": "price_bar" } }, "required": ["doc_type"] },
+      "then": { "required": ["price"], "properties": { "as_of_basis": { "const": "session_close" } } },
+      "else": { "not": { "required": ["price"] } }
+    },
+    {
+      "if": { "properties": { "doc_type": { "const": "rate_observation" } }, "required": ["doc_type"] },
+      "then": { "required": ["observation"] },
+      "else": { "not": { "required": ["observation"] } }
+    },
+    {
+      "if": { "properties": { "source": { "properties": { "adapter": { "const": "edgar" } } } } },
+      "then": { "properties": { "as_of_basis": { "const": "edgar_acceptance" } } }
+    }
+  ]
+}
