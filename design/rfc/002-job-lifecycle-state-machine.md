@@ -1,8 +1,10 @@
-# RFC-002: Separate Job Lifecycle State Machines for Research, Reporting, Delivery, and Evaluation
+# RFC-002: Separate Job Lifecycle State Machines for Research, Thesis Versions, Delivery, and Evaluation
 
 Status: Discussion
 
 Date: 2026-07-23
+
+Entity rename (2026-09-23): "report" / "issue" → **thesis version** (see RFC-004). RFC-005 maps these lifecycles onto evaluation jobs and version review states.
 
 ## Problem
 
@@ -32,7 +34,7 @@ cannot clearly represent:
 Example:
 
 Research succeeded,
-report generated,
+thesis version generated,
 delivery failed.
 
 What should the job status be?
@@ -59,7 +61,7 @@ failed
 
 Responsible for research execution and evidence collection
 
-## Report Lifecycle
+## Thesis Version Lifecycle
 
 Example:
 
@@ -72,7 +74,7 @@ generated
 failed
 
 
-Responsible for user-specific report creation
+Responsible for per-thesis version creation
 
 ## Delivery Lifecycle
 
