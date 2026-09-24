@@ -1,0 +1,232 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://raw.githubusercontent.com/zen-tradings/zen-fundamentals/main/design/schemas/eval-result-row.schema.json",
+  "title": "EvalResultRow",
+  "description": "One row of the RFC-007 results table: one (config, variant, subset) within a replay run. Metrics that don't apply to the row are null. Metric definitions are in RFC-007 §4 and §6.",
+  "type": "object",
+  "required": ["run_id", "config", "variant", "subset", "valid", "template_version", "n_deals", "n_checkpoints", "repeats", "pit_violations", "metrics"],
+  "additionalProperties": false,
+  "properties": {
+    "run_id": { "type": "string" },
+    "config": {
+      "enum": ["B0", "B1", "B1-leak", "F", "A1", "A2", "G"],
+      "description": "B0 base rate; B1 market-implied (PIT unaffected date); B1-leak diagnostic; F full; A1 low-cost planner/estimator; A2 no auditor; G gate-off scoring of F."
+    },
+    "variant": { "enum": ["clean", "noise", "injected_errors", "faults"] },
+    "subset": {
+      "enum": ["H-named", "H-anon", "pre-cutoff-named"],
+      "description": "Headline rows are H-named and H-anon only; pre-cutoff-named is a contamination diagnostic."
+    },
+    "valid": {
+      "type": "boolean",
+      "description": "False if any point-in-time violation occurred; invalid rows are never reported as results."
+    },
+    "template_version": { "type": "string", "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$" },
+    "effective_cutoff": {
+      "type": ["string", "null"],
+      "format": "date",
+      "description": "max(stated training cutoff) across all models in the config; null for B0/B1."
+    },
+    "n_deals": { "type": "integer", "minimum": 0 },
+    "n_checkpoints": { "type": "integer", "minimum": 0 },
+    "repeats": { "type": "integer", "minimum": 1 },
+    "pit_violations": { "type": "integer", "minimum": 0 },
+    "metrics": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "brier_announcement": { "$ref": "#/$defs/Estimate" },
+        "brier_checkpoints": { "$ref": "#/$defs/Estimate" },
+        "brier_by_phase": {
+          "type": ["object", "null"],
+          "additionalProperties": false,
+          "properties": {
+            "life_0_25": { "$ref": "#/$defs/Estimate" },
+            "life_25_50": { "$ref": "#/$defs/Estimate" },
+            "life_50_75": { "$ref": "#/$defs/Estimate" },
+            "life_75_100": { "$ref": "#/$defs/Estimate" },
+            "first_after_second_request": { "$ref": "#/$defs/Estimate" }
+          }
+        },
+        "brier_skill_score": { "$ref": "#/$defs/Estimate" },
+        "brier_delta_vs_market": { "$ref": "#/$defs/Estimate", "description": "Paired: this config's Brier@checkpoints minus B1's, on the same deals and checkpoints." },
+        "scenario_brier_announcement": { "$ref": "#/$defs/Estimate" },
+        "scenario_brier_checkpoints": { "$ref": "#/$defs/Estimate" },
+        "scenario_price_rel_error": { "$ref": "#/$defs/Summary" },
+        "close_date_abs_error_days_announcement": { "$ref": "#/$defs/Summary" },
+        "close_date_abs_error_days_checkpoints": { "$ref": "#/$defs/Summary" },
+        "close_date_signed_bias_days": { "$ref": "#/$defs/Estimate" },
+        "condition_recall_announcement": { "$ref": "#/$defs/Estimate" },
+        "condition_recall_last": { "$ref": "#/$defs/Estimate" },
+        "condition_precision_last": { "$ref": "#/$defs/Estimate" },
+        "condition_status_accuracy_last": { "$ref": "#/$defs/Estimate" },
+        "citation_precision_judge": { "$ref": "#/$defs/Estimate" },
+        "citation_precision_human": { "$ref": "#/$defs/Estimate" },
+        "citation_human_sample_n": { "type": ["integer", "null"], "minimum": 0 },
+        "judge_human_kappa": { "$ref": "#/$defs/Estimate" },
+        "cost_per_version_usd": { "$ref": "#/$defs/Percentiles" },
+        "cost_per_evaluation_usd": { "$ref": "#/$defs/Percentiles" },
+        "latency_per_version_s": { "$ref": "#/$defs/Percentiles" },
+        "versions_per_deal": { "type": ["number", "null"], "minimum": 0 },
+        "versions_per_deal_month": { "type": ["number", "null"], "minimum": 0 },
+        "repeat_spread_brier_checkpoints_sd": { "type": ["number", "null"], "minimum": 0 }
+      }
+    },
+    "calibration": {
+      "type": "array",
+      "description": "Bins [0,.5) [.5,.7) [.7,.85) [.85,.95) [.95,1] over pooled checkpoints.",
+      "items": {
+        "type": "object",
+        "required": ["bin_low", "bin_high", "n_checkpoints", "n_deals", "mean_p", "observed_rate"],
+        "additionalProperties": false,
+        "properties": {
+          "bin_low": { "type": "number", "minimum": 0, "maximum": 1 },
+          "bin_high": { "type": "number", "minimum": 0, "maximum": 1 },
+          "n_checkpoints": { "type": "integer", "minimum": 0 },
+          "n_deals": { "type": "integer", "minimum": 0 },
+          "mean_p": { "type": ["number", "null"], "minimum": 0, "maximum": 1 },
+          "observed_rate": { "type": ["number", "null"], "minimum": 0, "maximum": 1 }
+        }
+      }
+    },
+    "robustness": {
+      "type": ["object", "null"],
+      "description": "Filled only for variant rows (noise, injected_errors, faults).",
+      "additionalProperties": false,
+      "properties": {
+        "noise": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "by_type": {
+              "type": "object",
+              "propertyNames": { "enum": ["irrelevant_release", "stale_redated", "false_rumor"] },
+              "additionalProperties": {
+                "type": "object",
+                "required": ["n_distractors"],
+                "additionalProperties": false,
+                "properties": {
+                  "n_distractors": { "type": "integer", "minimum": 0 },
+                  "induced_change_rate": { "$ref": "#/$defs/Estimate" },
+                  "drift_close_probability_abs": { "$ref": "#/$defs/Estimate" },
+                  "drift_close_date_days": { "$ref": "#/$defs/Estimate" },
+                  "citation_rate_support": { "$ref": "#/$defs/Estimate" },
+                  "citation_rate_uncertain_only": { "$ref": "#/$defs/Estimate" }
+                }
+              }
+            },
+            "noisy_minus_clean_brier": { "$ref": "#/$defs/Estimate" }
+          }
+        },
+        "injected_errors": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "by_class": {
+              "type": "object",
+              "propertyNames": { "enum": ["scenario_sum", "derivation_mismatch", "term_arithmetic", "date_order", "missing_citation", "future_citation", "wrong_citation", "status_inconsistency"] },
+              "additionalProperties": {
+                "type": "object",
+                "required": ["n_injected"],
+                "additionalProperties": false,
+                "properties": {
+                  "n_injected": { "type": "integer", "minimum": 0 },
+                  "self_check_catch_rate": { "$ref": "#/$defs/Estimate" },
+                  "downstream_catch_rate": { "$ref": "#/$defs/Estimate" },
+                  "escape_rate": { "$ref": "#/$defs/Estimate" }
+                }
+              }
+            },
+            "overall_self_check_catch_rate": { "$ref": "#/$defs/Estimate" },
+            "overall_escape_rate": { "$ref": "#/$defs/Estimate" }
+          }
+        },
+        "faults": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "by_class": {
+              "type": "object",
+              "propertyNames": { "enum": ["fetch_5xx", "fetch_timeout", "rate_limited", "malformed_document", "extractor_malformed", "extractor_timeout", "route_outage"] },
+              "additionalProperties": {
+                "type": "object",
+                "required": ["n_injected"],
+                "additionalProperties": false,
+                "properties": {
+                  "n_injected": { "type": "integer", "minimum": 0 },
+                  "recovery_rate": { "$ref": "#/$defs/Estimate" },
+                  "safe_failure_rate": { "$ref": "#/$defs/Estimate" },
+                  "unsafe_rate": { "$ref": "#/$defs/Estimate" }
+                }
+              }
+            },
+            "recovery_rate": { "$ref": "#/$defs/Estimate" },
+            "safe_failure_rate": { "$ref": "#/$defs/Estimate" },
+            "unsafe_rate": { "$ref": "#/$defs/Estimate" },
+            "recording_completeness": { "$ref": "#/$defs/Estimate" },
+            "added_latency_s": { "$ref": "#/$defs/Percentiles" },
+            "added_cost_usd": { "$ref": "#/$defs/Percentiles" }
+          }
+        }
+      }
+    },
+    "exclusions_ref": {
+      "type": "string",
+      "description": "Path or URL of exclusions.csv for this run (RFC-007 §7.2)."
+    }
+  },
+  "allOf": [
+    {
+      "if": { "properties": { "pit_violations": { "minimum": 1 } } },
+      "then": { "properties": { "valid": { "const": false } } }
+    }
+  ],
+  "$defs": {
+    "Estimate": {
+      "description": "Point estimate with a 95% deal-level bootstrap CI (null when not applicable).",
+      "oneOf": [
+        { "type": "null" },
+        {
+          "type": "object",
+          "required": ["value"],
+          "additionalProperties": false,
+          "properties": {
+            "value": { "type": "number" },
+            "ci_low": { "type": "number" },
+            "ci_high": { "type": "number" }
+          }
+        }
+      ]
+    },
+    "Summary": {
+      "oneOf": [
+        { "type": "null" },
+        {
+          "type": "object",
+          "required": ["median", "mean"],
+          "additionalProperties": false,
+          "properties": {
+            "median": { "type": "number" },
+            "mean": { "type": "number" },
+            "ci_low_median": { "type": "number" },
+            "ci_high_median": { "type": "number" }
+          }
+        }
+      ]
+    },
+    "Percentiles": {
+      "oneOf": [
+        { "type": "null" },
+        {
+          "type": "object",
+          "required": ["p50", "p90"],
+          "additionalProperties": false,
+          "properties": {
+            "p50": { "type": "number", "minimum": 0 },
+            "p90": { "type": "number", "minimum": 0 }
+          }
+        }
+      ]
+    }
+  }
+}

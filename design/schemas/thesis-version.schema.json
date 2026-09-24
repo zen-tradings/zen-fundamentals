@@ -1,0 +1,368 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://raw.githubusercontent.com/zen-tradings/zen-fundamentals/main/design/schemas/thesis-version.schema.json",
+  "title": "ThesisVersion",
+  "description": "An immutable snapshot of every tracked quantity at a clock, with provenance (RFC-004). Everything except review_state is covered by content_hash. review_state is derived from the append-only review_events log.",
+  "type": "object",
+  "required": ["id", "thesis_id", "seq", "parent_version_id", "spec_revision", "template", "clock", "trigger", "evidence_set", "values", "deltas", "carried_forward", "self_check", "recoveries", "review_packet_id", "routing", "cost", "latency_ms", "created_at", "content_hash"],
+  "additionalProperties": false,
+  "properties": {
+    "id": { "type": "string", "pattern": "^tv_[a-z0-9]{16,64}$" },
+    "thesis_id": { "type": "string" },
+    "seq": { "type": "integer", "minimum": 1, "description": "Monotonic per thesis; allocated inside the fenced commit transaction (RFC-003)." },
+    "parent_version_id": {
+      "type": ["string", "null"],
+      "description": "Approved head this version was diffed against. Null for the initial version."
+    },
+    "supersedes": {
+      "type": ["string", "null"],
+      "description": "Pending candidate this version superseded, if any (RFC-004)."
+    },
+    "spec_revision": { "type": "integer", "minimum": 1 },
+    "template": {
+      "type": "object",
+      "required": ["id", "version"],
+      "additionalProperties": false,
+      "properties": {
+        "id": { "type": "string" },
+        "version": { "type": "string", "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$" }
+      }
+    },
+    "clock": {
+      "type": "string",
+      "format": "date-time",
+      "description": "Point-in-time bound. No evidence with as_of > clock influenced this version."
+    },
+    "trigger": {
+      "type": "object",
+      "required": ["kind", "evidence_ids"],
+      "additionalProperties": false,
+      "properties": {
+        "kind": { "enum": ["initial", "evidence", "manual", "spec_revision", "resolution"] },
+        "evidence_ids": { "type": "array", "items": { "$ref": "#/$defs/EvidenceId" } }
+      }
+    },
+    "evidence_set": {
+      "type": "object",
+      "required": ["ids", "hash", "max_as_of"],
+      "additionalProperties": false,
+      "properties": {
+        "ids": { "type": "array", "items": { "$ref": "#/$defs/EvidenceId" }, "uniqueItems": true },
+        "hash": { "type": "string", "pattern": "^sha256:[0-9a-f]{64}$", "description": "Hash of the sorted ids; part of the idempotency key (RFC-005)." },
+        "max_as_of": { "type": "string", "format": "date-time", "description": "Must be <= clock." }
+      }
+    },
+    "values": {
+      "$ref": "#/$defs/MergerArbValues"
+    },
+    "deltas": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/Delta" }
+    },
+    "carried_forward": {
+      "type": "array",
+      "items": { "type": "string" },
+      "uniqueItems": true,
+      "description": "Quantities not re-estimated in this evaluation; values copied from the parent."
+    },
+    "market_implied": { "$ref": "#/$defs/MarketImplied" },
+    "self_check": { "$ref": "#/$defs/SelfCheck" },
+    "recoveries": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/RecoveryEvent" }
+    },
+    "review_packet_id": { "type": "string", "pattern": "^rp_[a-z0-9]{16,64}$" },
+    "routing": {
+      "type": "object",
+      "required": ["planner", "estimator", "extractor", "auditor"],
+      "additionalProperties": false,
+      "properties": {
+        "planner": { "$ref": "#/$defs/ModelRef" },
+        "estimator": { "$ref": "#/$defs/ModelRef" },
+        "extractor": { "$ref": "#/$defs/ModelRef" },
+        "auditor": {
+          "anyOf": [{ "$ref": "#/$defs/ModelRef" }, { "type": "null" }],
+          "description": "Null only in the no-auditor ablation (RFC-007 A2)."
+        }
+      }
+    },
+    "cost": {
+      "type": "object",
+      "required": ["usd"],
+      "additionalProperties": false,
+      "properties": {
+        "usd": { "type": "number", "minimum": 0 },
+        "input_tokens": { "type": "integer", "minimum": 0 },
+        "output_tokens": { "type": "integer", "minimum": 0 },
+        "reasoning_tokens": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "latency_ms": { "type": "integer", "minimum": 0 },
+    "created_at": { "type": "string", "format": "date-time" },
+    "content_hash": { "type": "string", "pattern": "^sha256:[0-9a-f]{64}$" },
+    "review_state": {
+      "readOnly": true,
+      "enum": ["needs_review", "approved", "rejected", "superseded"],
+      "description": "Not part of content_hash. Derived from review_events."
+    }
+  },
+  "$defs": {
+    "EvidenceId": { "type": "string", "pattern": "^ev_[a-z0-9]{16,64}$" },
+    "ModelRef": {
+      "type": "object",
+      "required": ["provider", "model_id", "role"],
+      "additionalProperties": false,
+      "properties": {
+        "provider": { "type": "string" },
+        "model_id": { "type": "string" },
+        "role": { "enum": ["planner", "estimator", "extractor", "auditor", "eval_judge"] },
+        "route": { "enum": ["primary", "alternate"], "default": "primary" }
+      }
+    },
+    "Probability": { "type": "number", "minimum": 0, "maximum": 1 },
+    "Money": {
+      "type": "object",
+      "required": ["amount", "currency"],
+      "additionalProperties": false,
+      "properties": {
+        "amount": { "type": "number", "minimum": 0 },
+        "currency": { "type": "string", "pattern": "^[A-Z]{3}$" }
+      }
+    },
+    "Scenario": {
+      "type": "object",
+      "required": ["outcome", "probability", "target_price_per_share"],
+      "additionalProperties": false,
+      "properties": {
+        "outcome": { "enum": ["completed_as_announced", "renegotiated", "terminated"] },
+        "probability": { "$ref": "#/$defs/Probability" },
+        "target_price_per_share": { "$ref": "#/$defs/Money" },
+        "price_rationale": { "type": "string" }
+      }
+    },
+    "ScenarioSet": {
+      "type": "array",
+      "description": "Exactly one entry per outcome. Probabilities must sum to 1 within 1e-6. That rule can't be expressed in JSON Schema, so it is enforced by the self-check (RFC-005).",
+      "minItems": 3,
+      "maxItems": 3,
+      "items": { "$ref": "#/$defs/Scenario" },
+      "allOf": [
+        { "contains": { "properties": { "outcome": { "const": "completed_as_announced" } } } },
+        { "contains": { "properties": { "outcome": { "const": "renegotiated" } } } },
+        { "contains": { "properties": { "outcome": { "const": "terminated" } } } }
+      ]
+    },
+    "DerivedProbability": {
+      "type": "object",
+      "required": ["value", "derived_from", "formula"],
+      "additionalProperties": false,
+      "properties": {
+        "value": { "$ref": "#/$defs/Probability" },
+        "derived_from": { "const": "scenarios" },
+        "formula": { "const": "P(completed_as_announced) + P(renegotiated)" }
+      }
+    },
+    "DateEstimate": {
+      "type": "object",
+      "required": ["date"],
+      "additionalProperties": false,
+      "properties": {
+        "date": { "type": "string", "format": "date" },
+        "interval_80": {
+          "type": "object",
+          "required": ["low", "high"],
+          "additionalProperties": false,
+          "properties": {
+            "low": { "type": "string", "format": "date" },
+            "high": { "type": "string", "format": "date" }
+          }
+        },
+        "conditional_on": { "const": "completion" }
+      }
+    },
+    "Condition": {
+      "type": "object",
+      "required": ["key", "type", "description", "status"],
+      "additionalProperties": false,
+      "properties": {
+        "key": {
+          "type": "string",
+          "pattern": "^(regulatory|vote|tender|financing|other):[a-z0-9_:-]+$",
+          "description": "Canonical key from the RFC-008 vocabulary, e.g. regulatory:hsr, vote:target_shareholders."
+        },
+        "type": { "enum": ["regulatory", "shareholder_vote", "financing", "other"] },
+        "description": { "type": "string" },
+        "status": { "enum": ["pending", "satisfied", "waived", "failed", "not_applicable"] },
+        "expected_by": { "type": "string", "format": "date" }
+      }
+    },
+    "KeyTerms": {
+      "type": "object",
+      "required": ["consideration", "price_per_share", "break_fee", "outside_date"],
+      "additionalProperties": false,
+      "properties": {
+        "consideration": {
+          "type": "object",
+          "required": ["type"],
+          "additionalProperties": false,
+          "properties": {
+            "type": { "enum": ["cash", "stock", "mixed", "election"] },
+            "cash_per_share": { "$ref": "#/$defs/Money" },
+            "exchange_ratio": { "type": "number", "exclusiveMinimum": 0 },
+            "collar": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "kind": { "enum": ["fixed_value", "fixed_ratio", "other"] },
+                "lower_price": { "type": "number" },
+                "upper_price": { "type": "number" },
+                "description": { "type": "string" }
+              }
+            },
+            "cvr": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "description": { "type": "string" },
+                "max_value_per_share": { "$ref": "#/$defs/Money" }
+              }
+            },
+            "election_proration": { "type": "string" }
+          }
+        },
+        "price_per_share": {
+          "allOf": [{ "$ref": "#/$defs/Money" }],
+          "description": "Headline per-share value as announced."
+        },
+        "break_fee": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "target_termination_fee": { "$ref": "#/$defs/Money" },
+            "reverse_termination_fee": { "$ref": "#/$defs/Money" }
+          }
+        },
+        "outside_date": {
+          "type": "object",
+          "required": ["initial", "current"],
+          "additionalProperties": false,
+          "properties": {
+            "initial": { "type": "string", "format": "date" },
+            "extensions": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "required": ["to"],
+                "additionalProperties": false,
+                "properties": {
+                  "to": { "type": "string", "format": "date" },
+                  "trigger": { "type": "string", "description": "e.g. automatic if regulatory approvals pending" },
+                  "exercised": { "type": "boolean" }
+                }
+              }
+            },
+            "current": { "type": "string", "format": "date" }
+          }
+        }
+      }
+    },
+    "MergerArbValues": {
+      "type": "object",
+      "required": ["scenarios", "close_probability", "expected_close_date", "conditions", "key_terms"],
+      "additionalProperties": false,
+      "properties": {
+        "scenarios": { "$ref": "#/$defs/ScenarioSet" },
+        "close_probability": { "$ref": "#/$defs/DerivedProbability" },
+        "expected_close_date": { "$ref": "#/$defs/DateEstimate" },
+        "conditions": { "type": "array", "items": { "$ref": "#/$defs/Condition" } },
+        "key_terms": { "$ref": "#/$defs/KeyTerms" }
+      }
+    },
+    "Delta": {
+      "type": "object",
+      "required": ["quantity", "changed", "material"],
+      "additionalProperties": false,
+      "properties": {
+        "quantity": { "enum": ["scenarios", "close_probability", "expected_close_date", "conditions", "key_terms"] },
+        "changed": { "type": "boolean" },
+        "material": { "type": "boolean" },
+        "rule": { "type": "string", "description": "Rule that fired, e.g. 'scenarios.prob_abs>=0.05 (terminated)'." },
+        "detail": {
+          "type": "object",
+          "description": "Typed delta. probability: {abs}; date: {days}; conditions: {added[], removed[], status_changed[{key, from, to}]}; key_terms: {fields[]}; scenarios: {per_outcome[{outcome, prob_abs, price_rel}]}."
+        }
+      }
+    },
+    "MarketImplied": {
+      "type": "object",
+      "description": "RFC-008 market-implied probability. Reference only: not a tracked quantity, not an estimator input, never gates.",
+      "required": ["formula_version", "probability", "flags", "inputs"],
+      "additionalProperties": false,
+      "properties": {
+        "formula_version": { "const": "mi-1" },
+        "probability": { "anyOf": [{ "$ref": "#/$defs/Probability" }, { "type": "null" }] },
+        "null_reason": { "enum": ["degenerate_spread", "missing_prices", "missing_rate"] },
+        "flags": { "type": "array", "items": { "enum": ["trading_through", "clipped_low", "rate_defaulted_zero", "cvr_ignored"] } },
+        "inputs": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "price_session_date": { "type": "string", "format": "date" },
+            "S_t": { "type": "number" },
+            "A_t": { "type": "number" },
+            "V_t": { "type": "number" },
+            "D_t": { "type": "number" },
+            "S_u": { "type": "number" },
+            "M_u": { "type": "number" },
+            "M_t": { "type": "number" },
+            "r_t": { "type": "number" },
+            "tau_years": { "type": "number", "minimum": 0 },
+            "unaffected_date": { "type": "string", "format": "date" },
+            "evidence_ids": { "type": "array", "items": { "$ref": "#/$defs/EvidenceId" } }
+          }
+        }
+      }
+    },
+    "SelfCheck": {
+      "type": "object",
+      "required": ["passed", "revised", "checks"],
+      "additionalProperties": false,
+      "properties": {
+        "passed": { "type": "boolean" },
+        "revised": { "type": "boolean", "description": "True if the estimator used its one revision." },
+        "checks": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["name", "method", "passed"],
+            "additionalProperties": false,
+            "properties": {
+              "name": {
+                "enum": ["scenario_sum", "derivation", "date_order", "term_arithmetic", "completed_price_vs_consideration", "citation_coverage", "as_of_le_clock", "narrative_consistency"]
+              },
+              "method": { "enum": ["code", "model"] },
+              "passed": { "type": "boolean" },
+              "passed_after_revision": { "type": "boolean" },
+              "detail": { "type": "string" }
+            }
+          }
+        }
+      }
+    },
+    "RecoveryEvent": {
+      "type": "object",
+      "required": ["step", "tool_or_route", "error_class", "attempts", "path", "outcome"],
+      "additionalProperties": false,
+      "properties": {
+        "step": { "enum": ["ingest", "impact", "extract", "estimate", "self_check", "audit"] },
+        "tool_or_route": { "type": "string" },
+        "error_class": { "enum": ["fetch_5xx", "fetch_timeout", "rate_limited", "malformed_document", "extractor_malformed", "extractor_timeout", "route_outage", "other"] },
+        "attempts": { "type": "integer", "minimum": 1 },
+        "path": { "type": "string", "pattern": "^(retry|alternate:[A-Za-z0-9._-]+|degraded|failed)$" },
+        "outcome": { "enum": ["recovered", "degraded", "failed"] },
+        "latency_ms": { "type": "integer", "minimum": 0 },
+        "injected": { "type": "boolean", "description": "Set by the RFC-007 fault-injection harness only." }
+      }
+    }
+  }
+}

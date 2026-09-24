@@ -1,0 +1,263 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://raw.githubusercontent.com/zen-tradings/zen-fundamentals/main/design/schemas/review-packet.schema.json",
+  "title": "ReviewPacket",
+  "description": "Immutable human-review artifact for one ThesisVersion (RFC-006). Section order when rendered follows the template layout (RFC-008).",
+  "type": "object",
+  "required": ["id", "version_id", "thesis_id", "header", "changes", "unchanged", "conflicts", "uncertain_items", "investor_judgment_items", "self_check", "recoveries", "evidence_appendix", "audit_summary"],
+  "additionalProperties": false,
+  "properties": {
+    "id": { "type": "string", "pattern": "^rp_[a-z0-9]{16,64}$" },
+    "version_id": { "type": "string", "pattern": "^tv_[a-z0-9]{16,64}$" },
+    "thesis_id": { "type": "string" },
+    "header": {
+      "type": "object",
+      "required": ["seq", "parent_version_id", "clock", "template", "spec_revision", "trigger", "routing", "audit_status"],
+      "additionalProperties": false,
+      "properties": {
+        "seq": { "type": "integer", "minimum": 1 },
+        "parent_version_id": { "type": ["string", "null"] },
+        "clock": { "type": "string", "format": "date-time" },
+        "template": { "$ref": "thesis-version.schema.json#/properties/template" },
+        "spec_revision": { "type": "integer", "minimum": 1 },
+        "trigger": { "$ref": "thesis-version.schema.json#/properties/trigger" },
+        "routing": { "$ref": "thesis-version.schema.json#/properties/routing" },
+        "audit_status": { "enum": ["passed", "failed", "overridden"] },
+        "degradations": {
+          "type": "array",
+          "description": "What budget pressure dropped (RFC-005).",
+          "items": { "enum": ["secondary_evidence_dropped", "dependency_only_quantities_skipped"] }
+        }
+      }
+    },
+    "changes": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["quantity", "old_value", "new_value", "delta", "caused_by", "claims"],
+        "additionalProperties": false,
+        "properties": {
+          "quantity": { "$ref": "thesis-version.schema.json#/$defs/Delta/properties/quantity" },
+          "old_value": { "description": "Typed per thesis-version.schema.json#/$defs/MergerArbValues; null for the initial version." },
+          "new_value": { "description": "Typed per thesis-version.schema.json#/$defs/MergerArbValues." },
+          "delta": { "$ref": "thesis-version.schema.json#/$defs/Delta" },
+          "caused_by": {
+            "type": "array",
+            "description": "Evidence that triggered re-estimation of this quantity (from the ImpactAssessment).",
+            "items": { "$ref": "thesis-version.schema.json#/$defs/EvidenceId" }
+          },
+          "claims": { "type": "array", "items": { "$ref": "#/$defs/Claim" } }
+        }
+      }
+    },
+    "scenario_table": {
+      "type": "array",
+      "description": "Present for templates with a scenario_set quantity.",
+      "items": {
+        "type": "object",
+        "required": ["outcome", "new_probability", "new_price"],
+        "additionalProperties": false,
+        "properties": {
+          "outcome": { "$ref": "thesis-version.schema.json#/$defs/Scenario/properties/outcome" },
+          "old_probability": { "anyOf": [{ "$ref": "thesis-version.schema.json#/$defs/Probability" }, { "type": "null" }] },
+          "new_probability": { "$ref": "thesis-version.schema.json#/$defs/Probability" },
+          "old_price": { "anyOf": [{ "$ref": "thesis-version.schema.json#/$defs/Money" }, { "type": "null" }] },
+          "new_price": { "$ref": "thesis-version.schema.json#/$defs/Money" },
+          "claim_ids": { "type": "array", "items": { "type": "string" } }
+        }
+      }
+    },
+    "market_comparison": {
+      "type": "object",
+      "required": ["agent_close_probability", "market_implied", "flagged"],
+      "additionalProperties": false,
+      "properties": {
+        "agent_close_probability": { "$ref": "thesis-version.schema.json#/$defs/Probability" },
+        "market_implied": { "$ref": "thesis-version.schema.json#/$defs/MarketImplied" },
+        "gap": { "type": ["number", "null"] },
+        "flagged": { "type": "boolean", "description": "True if |gap| > market_gap_flag; an investor judgment item is then added." }
+      }
+    },
+    "unchanged": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["quantity", "reason"],
+        "additionalProperties": false,
+        "properties": {
+          "quantity": { "type": "string" },
+          "reason": { "enum": ["carried_forward", "reestimated_no_change"] }
+        }
+      }
+    },
+    "conflicts": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["description", "sides", "resolution"],
+        "additionalProperties": false,
+        "properties": {
+          "description": { "type": "string" },
+          "sides": {
+            "type": "array",
+            "minItems": 2,
+            "items": {
+              "type": "object",
+              "required": ["claim_ids"],
+              "additionalProperties": false,
+              "properties": { "claim_ids": { "type": "array", "minItems": 1, "items": { "type": "string" } } }
+            }
+          },
+          "resolution": { "type": "string" },
+          "resolved_by": { "$ref": "thesis-version.schema.json#/$defs/ModelRef" }
+        }
+      }
+    },
+    "uncertain_items": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["by", "reason"],
+        "additionalProperties": false,
+        "properties": {
+          "claim_id": { "type": "string" },
+          "quantity": { "type": "string" },
+          "by": { "enum": ["estimator", "auditor", "self_check", "recovery"] },
+          "reason": { "type": "string" }
+        },
+        "anyOf": [{ "required": ["claim_id"] }, { "required": ["quantity"] }]
+      }
+    },
+    "investor_judgment_items": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["question", "why", "related_quantities"],
+        "additionalProperties": false,
+        "properties": {
+          "question": { "type": "string" },
+          "why": { "type": "string", "description": "Why this is judgment rather than fact." },
+          "related_quantities": { "type": "array", "items": { "type": "string" } },
+          "considerations": { "type": "array", "items": { "type": "string" } },
+          "source": { "enum": ["estimator", "template_prompt", "market_gap"] }
+        }
+      }
+    },
+    "self_check": { "$ref": "thesis-version.schema.json#/$defs/SelfCheck" },
+    "recoveries": { "type": "array", "items": { "$ref": "thesis-version.schema.json#/$defs/RecoveryEvent" } },
+    "evidence_appendix": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["evidence_id", "source", "tier", "doc_type", "as_of", "content_hash"],
+        "additionalProperties": false,
+        "properties": {
+          "evidence_id": { "$ref": "thesis-version.schema.json#/$defs/EvidenceId" },
+          "source": { "$ref": "evidence-item.schema.json#/properties/source" },
+          "tier": { "$ref": "evidence-item.schema.json#/properties/tier" },
+          "doc_type": { "type": "string" },
+          "as_of": { "type": "string", "format": "date-time" },
+          "content_hash": { "$ref": "evidence-item.schema.json#/properties/content_hash" }
+        }
+      }
+    },
+    "audit_summary": {
+      "type": "object",
+      "required": ["checks", "repair_attempted", "spot_check_selected"],
+      "additionalProperties": false,
+      "properties": {
+        "checks": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["name", "by", "passed"],
+            "additionalProperties": false,
+            "properties": {
+              "name": { "enum": ["evidence_in_set", "as_of_le_clock", "stated_dates", "quote_exists", "quote_supports", "provenance_label", "primary_citation_per_change"] },
+              "by": { "enum": ["code", "auditor"] },
+              "passed": { "type": "boolean" },
+              "failures": { "type": "array", "items": { "type": "string" }, "description": "Claim IDs or quantities that failed." }
+            }
+          }
+        },
+        "repair_attempted": { "type": "boolean" },
+        "spot_check_selected": { "type": "boolean", "description": "Selected for human citation spot-check (RFC-007 §4)." },
+        "override_reason": { "type": "string", "description": "Required when approving with audit_status failed; then audit_status reads overridden." }
+      }
+    }
+  },
+  "$defs": {
+    "Claim": {
+      "type": "object",
+      "required": ["id", "text", "quantity", "provenance", "model", "citations", "audit", "uncertain"],
+      "additionalProperties": false,
+      "properties": {
+        "id": { "type": "string", "pattern": "^cl_[a-z0-9]{8,64}$" },
+        "text": { "type": "string" },
+        "quantity": { "type": "string" },
+        "provenance": {
+          "enum": ["extracted", "computed", "inferred"],
+          "description": "extracted: the cited quote entails the claim with at most normalization. computed: deterministic code, no model. inferred: a model concluded beyond the text."
+        },
+        "model": {
+          "anyOf": [{ "$ref": "thesis-version.schema.json#/$defs/ModelRef" }, { "type": "null" }]
+        },
+        "computation": {
+          "type": "object",
+          "required": ["formula", "input_claim_ids"],
+          "additionalProperties": false,
+          "properties": {
+            "formula": { "type": "string" },
+            "input_claim_ids": { "type": "array", "items": { "type": "string" } }
+          }
+        },
+        "citations": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["evidence_id", "locator", "quote"],
+            "additionalProperties": false,
+            "properties": {
+              "evidence_id": { "$ref": "thesis-version.schema.json#/$defs/EvidenceId" },
+              "locator": { "type": "string", "description": "Section, page, or char span, e.g. 'EX-2.1 §7.1(b)' or 'chars:10230-10412'." },
+              "quote": { "type": "string" }
+            }
+          }
+        },
+        "audit": {
+          "type": "object",
+          "required": ["citation", "provenance_ok", "as_of_ok"],
+          "additionalProperties": false,
+          "properties": {
+            "citation": { "enum": ["supported", "partial", "unsupported", "not_checked"] },
+            "provenance_ok": { "type": "boolean" },
+            "as_of_ok": { "type": "boolean" },
+            "auditor": { "anyOf": [{ "$ref": "thesis-version.schema.json#/$defs/ModelRef" }, { "type": "null" }] },
+            "downgraded_from": { "const": "extracted", "description": "Set when the auditor downgraded an extracted claim to inferred." }
+          }
+        },
+        "uncertain": {
+          "type": "object",
+          "required": ["flagged"],
+          "additionalProperties": false,
+          "properties": {
+            "flagged": { "type": "boolean" },
+            "by": { "enum": ["estimator", "auditor", "self_check", "recovery"] },
+            "reason": { "type": "string" }
+          }
+        }
+      },
+      "allOf": [
+        {
+          "if": { "properties": { "provenance": { "const": "computed" } } },
+          "then": { "required": ["computation"], "properties": { "model": { "type": "null" } } },
+          "else": { "properties": { "model": { "$ref": "thesis-version.schema.json#/$defs/ModelRef" } } }
+        },
+        {
+          "if": { "properties": { "provenance": { "const": "extracted" } } },
+          "then": { "properties": { "citations": { "minItems": 1 } } }
+        }
+      ]
+    }
+  }
+}
