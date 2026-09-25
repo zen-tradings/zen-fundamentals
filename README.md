@@ -143,7 +143,9 @@ Early design. RFCs in [`design/rfc/`](design/rfc/):
 
 Core schemas in [`design/schemas/core/`](design/schemas/core/): [Thesis](design/schemas/core/thesis.schema.json), [ThesisVersion](design/schemas/core/thesis-version.schema.json), [EvidenceItem](design/schemas/core/evidence-item.schema.json), [ReviewPacket](design/schemas/core/review-packet.schema.json), [eval results row](design/schemas/core/eval-result-row.schema.json), [quantity types](design/schemas/core/quantity-types.schema.json).
 
-Templates in [`design/templates/`](design/templates/): [`neocloud_deal`](design/templates/neocloud_deal/) (manifest, subject, values, params, baseline, eval spec and metrics).
+Templates in [`design/templates/`](design/templates/): [`neocloud_deal`](design/templates/neocloud_deal/) (manifest, subject, values, params, baseline, eval spec and metrics, example thesis) and a [`merger_arb`](design/templates/merger_arb/) sketch that proves a second deal type fits with no core edits.
+
+`python3 design/check.py` (needs PyYAML and jsonschema) validates every schema and `$ref`, checks each template manifest against the core contract, validates example theses in two stages, confirms the core stays template-agnostic, and checks links.
 
 Planned: OpenAPI spec, model capability profiles, replay dataset manifest and annotation guide, reference implementation.
 

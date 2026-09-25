@@ -1,0 +1,10 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://raw.githubusercontent.com/zen-tradings/zen-fundamentals/main/design/templates/merger_arb/params.schema.json",
+  "title": "merger_arb parameters (sketch)",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "market_gap_flag": { "type": "number", "exclusiveMinimum": 0, "maximum": 1, "default": 0.15 }
+  }
+}

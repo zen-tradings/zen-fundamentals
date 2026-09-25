@@ -13,7 +13,7 @@ A template's estimates are only useful if they are calibrated, rank the eventual
 1. **Look-ahead.** A replay that shows the agent a later document, even through a cached extraction, measures nothing.
 2. **Contamination.** The models may already know how a historical case ended, from pretraining. A good score can mean the model remembered the answer rather than estimated it.
 
-This RFC defines the **core harness**: what every template's eval spec must provide, how cases are replayed, how look-ahead and contamination are controlled, the core metrics, the core configurations, the robustness mechanics, and the output format. Each template's `eval.md` fills in the dataset, labels, metrics, and baselines (RFC-009). The first is [`templates/neocloud_deal/eval.md`](../templates/neocloud_deal/eval.md).
+This RFC defines the **core harness**: what every template's eval spec must provide, how cases are replayed, how look-ahead and contamination are controlled, the core metrics, the core configurations, the robustness mechanics, and the output format. Each template's `eval.md` fills in the dataset, labels, metrics, and baselines (RFC-009). (Example (`neocloud_deal`): [its eval spec](../templates/neocloud_deal/eval.md).)
 
 No results exist yet.
 

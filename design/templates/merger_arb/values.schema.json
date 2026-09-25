@@ -1,0 +1,139 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://raw.githubusercontent.com/zen-tradings/zen-fundamentals/main/design/templates/merger_arb/values.schema.json",
+  "title": "merger_arb values (sketch)",
+  "description": "Shape of ThesisVersion.values for merger_arb, composed only from core quantity types (RFC-009).",
+  "type": "object",
+  "required": ["scenarios", "close_probability", "expected_close_date", "conditions", "key_terms"],
+  "additionalProperties": false,
+  "properties": {
+    "scenarios": {
+      "allOf": [
+        { "$ref": "../../schemas/core/quantity-types.schema.json#/$defs/scenario_set" },
+        {
+          "minItems": 3,
+          "maxItems": 3,
+          "items": {
+            "properties": {
+              "outcome": { "enum": ["completed_as_announced", "renegotiated", "terminated"] }
+            }
+          }
+        }
+      ],
+      "description": "One entry per outcome; value = estimated target price per share once that outcome resolves."
+    },
+    "close_probability": {
+      "allOf": [
+        { "$ref": "../../schemas/core/quantity-types.schema.json#/$defs/derived_probability" },
+        {
+          "properties": {
+            "derived_from": { "const": "scenarios" },
+            "formula": { "const": "P(completed_as_announced) + P(renegotiated)" }
+          }
+        }
+      ]
+    },
+    "expected_close_date": {
+      "allOf": [
+        { "$ref": "../../schemas/core/quantity-types.schema.json#/$defs/date_estimate" },
+        {
+          "properties": { "conditional_on": { "const": "completion" } }
+        }
+      ]
+    },
+    "conditions": {
+      "allOf": [
+        { "$ref": "../../schemas/core/quantity-types.schema.json#/$defs/condition_list" },
+        {
+          "items": {
+            "properties": {
+              "key": { "pattern": "^(regulatory|vote|tender|financing|other):[a-z0-9_:-]+$" },
+              "type": { "enum": ["regulatory", "shareholder_vote", "financing", "other"] }
+            }
+          }
+        }
+      ],
+      "description": "Vocabulary in vocab/conditions.yaml."
+    },
+    "key_terms": {
+      "allOf": [
+        { "$ref": "../../schemas/core/quantity-types.schema.json#/$defs/facts" },
+        { "$ref": "#/$defs/KeyTerms" }
+      ]
+    }
+  },
+  "$defs": {
+    "KeyTerms": {
+      "type": "object",
+      "required": ["consideration", "price_per_share", "break_fee", "outside_date"],
+      "additionalProperties": false,
+      "properties": {
+        "consideration": {
+          "type": "object",
+          "required": ["type"],
+          "additionalProperties": false,
+          "properties": {
+            "type": { "enum": ["cash", "stock", "mixed", "election"] },
+            "cash_per_share": { "$ref": "../../schemas/core/quantity-types.schema.json#/$defs/Money" },
+            "exchange_ratio": { "type": "number", "exclusiveMinimum": 0 },
+            "collar": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "kind": { "enum": ["fixed_value", "fixed_ratio", "other"] },
+                "lower_price": { "type": "number" },
+                "upper_price": { "type": "number" },
+                "description": { "type": "string" }
+              }
+            },
+            "cvr": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "description": { "type": "string" },
+                "max_value_per_share": { "$ref": "../../schemas/core/quantity-types.schema.json#/$defs/Money" }
+              }
+            },
+            "election_proration": { "type": "string" }
+          }
+        },
+        "price_per_share": {
+          "allOf": [
+            { "$ref": "../../schemas/core/quantity-types.schema.json#/$defs/Money" }
+          ],
+          "description": "Headline per-share value as announced."
+        },
+        "break_fee": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "target_termination_fee": { "$ref": "../../schemas/core/quantity-types.schema.json#/$defs/Money" },
+            "reverse_termination_fee": { "$ref": "../../schemas/core/quantity-types.schema.json#/$defs/Money" }
+          }
+        },
+        "outside_date": {
+          "type": "object",
+          "required": ["initial", "current"],
+          "additionalProperties": false,
+          "properties": {
+            "initial": { "type": "string", "format": "date" },
+            "extensions": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "required": ["to"],
+                "additionalProperties": false,
+                "properties": {
+                  "to": { "type": "string", "format": "date" },
+                  "trigger": { "type": "string", "description": "e.g. automatic if regulatory approvals pending" },
+                  "exercised": { "type": "boolean" }
+                }
+              }
+            },
+            "current": { "type": "string", "format": "date" }
+          }
+        }
+      }
+    }
+  }
+}
