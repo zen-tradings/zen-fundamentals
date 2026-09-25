@@ -1,0 +1,87 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://raw.githubusercontent.com/zen-tradings/zen-fundamentals/main/design/templates/neocloud_deal/eval-metrics.schema.json",
+  "title": "neocloud_deal template metrics",
+  "description": "EvalResultRow.template_metrics for neocloud_deal. Definitions in templates/neocloud_deal/eval.md.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["n_events"],
+  "properties": {
+    "n_events": {
+      "type": "object",
+      "required": ["acquisitions", "stakes"],
+      "additionalProperties": false,
+      "properties": {
+        "acquisitions": { "type": "integer", "minimum": 0 },
+        "stakes": { "type": "integer", "minimum": 0, "description": "Primary-confirmed stake events only." }
+      }
+    },
+    "acquirer_log_loss_start": { "$ref": "../../schemas/core/eval-result-row.schema.json#/$defs/Estimate" },
+    "acquirer_log_loss_checkpoints": { "$ref": "../../schemas/core/eval-result-row.schema.json#/$defs/Estimate" },
+    "acquirer_multiclass_brier_start": { "$ref": "../../schemas/core/eval-result-row.schema.json#/$defs/Estimate" },
+    "acquirer_multiclass_brier_checkpoints": { "$ref": "../../schemas/core/eval-result-row.schema.json#/$defs/Estimate" },
+    "p_acquired_brier": { "$ref": "../../schemas/core/eval-result-row.schema.json#/$defs/Estimate" },
+    "p_acquired_bss": { "$ref": "../../schemas/core/eval-result-row.schema.json#/$defs/Estimate" },
+    "announcement_date_abs_error_days_start": { "$ref": "../../schemas/core/eval-result-row.schema.json#/$defs/Summary" },
+    "announcement_date_abs_error_days_checkpoints": { "$ref": "../../schemas/core/eval-result-row.schema.json#/$defs/Summary" },
+    "stake_brier": { "$ref": "../../schemas/core/eval-result-row.schema.json#/$defs/Estimate" },
+    "stake_bss": { "$ref": "../../schemas/core/eval-result-row.schema.json#/$defs/Estimate" },
+    "stake_log_loss": { "$ref": "../../schemas/core/eval-result-row.schema.json#/$defs/Estimate" },
+    "rank": {
+      "type": ["object", "null"],
+      "description": "Positive events only. Top-k hit rates at the initial checkpoint and the last checkpoints >= 90 and >= 30 days before the event.",
+      "additionalProperties": false,
+      "properties": {
+        "top1_start": { "$ref": "../../schemas/core/eval-result-row.schema.json#/$defs/Estimate" },
+        "top3_start": { "$ref": "../../schemas/core/eval-result-row.schema.json#/$defs/Estimate" },
+        "top1_90d": { "$ref": "../../schemas/core/eval-result-row.schema.json#/$defs/Estimate" },
+        "top3_90d": { "$ref": "../../schemas/core/eval-result-row.schema.json#/$defs/Estimate" },
+        "top1_30d": { "$ref": "../../schemas/core/eval-result-row.schema.json#/$defs/Estimate" },
+        "top3_30d": { "$ref": "../../schemas/core/eval-result-row.schema.json#/$defs/Estimate" },
+        "mean_rank_90d": { "$ref": "../../schemas/core/eval-result-row.schema.json#/$defs/Estimate" }
+      }
+    },
+    "lead_time_days": { "$ref": "../../schemas/core/eval-result-row.schema.json#/$defs/Summary" },
+    "false_alarm_rate": { "$ref": "../../schemas/core/eval-result-row.schema.json#/$defs/Estimate" },
+    "stake_by_structure": {
+      "type": ["object", "null"],
+      "description": "Positive stake events split by labeled structure (RFC-007 §4 By stake structure). Stake Brier is not split, since negatives have no structure.",
+      "propertyNames": { "enum": ["pure_equity", "commercial", "undetermined"] },
+      "additionalProperties": {
+        "type": "object",
+        "required": ["n_events"],
+        "additionalProperties": false,
+        "properties": {
+          "n_events": { "type": "integer", "minimum": 0 },
+          "top1_90d": { "$ref": "../../schemas/core/eval-result-row.schema.json#/$defs/Estimate" },
+          "top3_90d": { "$ref": "../../schemas/core/eval-result-row.schema.json#/$defs/Estimate" },
+          "lead_time_days": { "$ref": "../../schemas/core/eval-result-row.schema.json#/$defs/Summary" }
+        }
+      }
+    },
+    "structure_tag_accuracy": { "$ref": "../../schemas/core/eval-result-row.schema.json#/$defs/Estimate" },
+    "structure_tag_annotator_agreement": { "$ref": "../../schemas/core/eval-result-row.schema.json#/$defs/Estimate" },
+    "delta_vs_prior_acquirer_log_loss": {
+      "$ref": "../../schemas/core/eval-result-row.schema.json#/$defs/Estimate",
+      "description": "Paired: this config's acquirer log loss @checkpoints minus B1's, on the same cases and checkpoints."
+    },
+    "delta_vs_prior_stake_brier": { "$ref": "../../schemas/core/eval-result-row.schema.json#/$defs/Estimate" },
+    "relationship_recall_start": { "$ref": "../../schemas/core/eval-result-row.schema.json#/$defs/Estimate" },
+    "relationship_recall_last": { "$ref": "../../schemas/core/eval-result-row.schema.json#/$defs/Estimate" },
+    "relationship_precision_last": { "$ref": "../../schemas/core/eval-result-row.schema.json#/$defs/Estimate" },
+    "secondary_only_change_rate": { "$ref": "../../schemas/core/eval-result-row.schema.json#/$defs/Estimate" },
+    "rumor_hit_rate": { "$ref": "../../schemas/core/eval-result-row.schema.json#/$defs/Estimate" },
+    "noise_drift_by_type": {
+      "type": "object",
+      "description": "Per distractor type: mean absolute log-odds drift in p_acquired and in the named candidate's probabilities vs. clean (RFC-007 §6.1 as specialized in eval.md).",
+      "additionalProperties": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "p_acquired_logit": { "$ref": "../../schemas/core/eval-result-row.schema.json#/$defs/Estimate" },
+          "named_candidate_logit": { "$ref": "../../schemas/core/eval-result-row.schema.json#/$defs/Estimate" }
+        }
+      }
+    }
+  }
+}

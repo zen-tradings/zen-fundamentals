@@ -1,0 +1,139 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://raw.githubusercontent.com/zen-tradings/zen-fundamentals/main/design/schemas/core/evidence-item.schema.json",
+  "title": "EvidenceItem",
+  "description": "An immutable, content-addressed item in the shared evidence layer (RFC-001). One item may be cited by many theses. Point-in-time rule: an item is visible to an estimation step only if as_of <= clock (RFC-005).",
+  "type": "object",
+  "required": ["id", "content_hash", "namespace", "source", "tier", "doc_type", "as_of", "as_of_basis", "as_of_precision", "retrieved_at", "status"],
+  "additionalProperties": false,
+  "properties": {
+    "id": {
+      "type": "string",
+      "pattern": "^ev_[a-z0-9]{16,64}$",
+      "description": "Stable ID derived from namespace + content_hash."
+    },
+    "content_hash": {
+      "type": "string",
+      "pattern": "^sha256:[0-9a-f]{64}$",
+      "description": "Hash of the normalized content."
+    },
+    "namespace": {
+      "type": "string",
+      "pattern": "^(live|replay:[A-Za-z0-9._-]+|anon:[A-Za-z0-9._-]+)$",
+      "description": "live for production; replay:<corpus> for a frozen corpus; anon:<case_id> for an anonymized twin (RFC-007 §3.2). Namespaces never share extraction caches."
+    },
+    "visibility": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "partition": {
+          "type": "string",
+          "pattern": "^(global|tenant:[A-Za-z0-9_-]+)$"
+        }
+      },
+      "required": ["partition"]
+    },
+    "source": {
+      "type": "object",
+      "required": ["adapter"],
+      "additionalProperties": false,
+      "properties": {
+        "adapter": {
+          "type": "string",
+          "description": "Adapter that produced the item.",
+          "examples": ["edgar", "press_release", "news", "web_search", "replay_distractor"]
+        },
+        "publisher": { "type": "string" },
+        "url": { "type": "string", "format": "uri" },
+        "accession": {
+          "type": "string",
+          "pattern": "^[0-9]{10}-[0-9]{2}-[0-9]{6}$",
+          "description": "EDGAR accession number, when applicable."
+        },
+        "filer_cik": { "type": "string", "pattern": "^[0-9]{10}$" },
+        "reliability": {
+          "enum": ["high", "normal", "low"],
+          "description": "Adapter-assigned reliability within a tier (for news, from the configured outlet list). False-rumor distractors are secondary + low."
+        }
+      }
+    },
+    "tier": {
+      "enum": ["primary", "secondary"],
+      "description": "Trust tier. Primary: issuer or regulator documents (EDGAR, company press releases). Secondary: news and web."
+    },
+    "doc_type": {
+      "type": "string",
+      "description": "Form type or document class.",
+      "examples": ["8-K", "10-K", "10-Q", "S-1", "S-1/A", "SC 13D", "SC 13G", "D", "DEF 14A", "press_release", "news_article", "web_article"]
+    },
+    "form_items": {
+      "type": "array",
+      "items": { "type": "string", "pattern": "^[0-9]+\\.[0-9]{2}$" },
+      "description": "8-K item numbers, e.g. 1.01, 2.01."
+    },
+    "as_of": {
+      "type": "string",
+      "format": "date-time",
+      "description": "Publication or filing timestamp (UTC). Never the retrieval time, unless as_of_basis is retrieved_at."
+    },
+    "as_of_basis": {
+      "enum": ["edgar_acceptance", "wire_timestamp", "dateline_date_eod", "publication_date", "archive_capture", "retrieved_at", "replay_injection"],
+      "description": "How as_of was determined. dateline_date_eod pins a date-only timestamp to 23:59:59 in the publisher's timezone. archive_capture means the first public web-archive capture was later than the stated publication time and was used instead (RFC-007 §1.4). replay_injection marks distractors injected by the RFC-007 harness."
+    },
+    "as_of_precision": { "enum": ["exact", "day"] },
+    "retrieved_at": { "type": "string", "format": "date-time" },
+    "entities": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "cik": { "type": "string", "pattern": "^[0-9]{10}$" },
+          "ticker": { "type": "string" },
+          "name": { "type": "string" },
+          "role": { "enum": ["filer", "subject", "mentioned"] }
+        }
+      }
+    },
+    "amends": {
+      "type": ["string", "null"],
+      "pattern": "^ev_[a-z0-9]{16,64}$",
+      "description": "Earlier item this one amends or revises. The earlier item is never edited."
+    },
+    "status": {
+      "enum": ["ok", "normalize_failed"],
+      "description": "normalize_failed items are stored but not citable (RFC-005 failure recovery)."
+    },
+    "normalized": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "text_ref": { "type": "string", "description": "Pointer to normalized text in blob storage." },
+        "mime": { "type": "string" },
+        "bytes": { "type": "integer", "minimum": 0 },
+        "normalizer": { "type": "string", "description": "Normalizer name and version, including alternates." }
+      }
+    },
+    "archive": {
+      "type": "object",
+      "description": "News items: the stated publication time and the first public web-archive capture. In replay corpora as_of is the later of the two, and the stored text is the earliest captured version (RFC-007 §1.4).",
+      "required": ["stated_published_at", "first_capture_at"],
+      "additionalProperties": false,
+      "properties": {
+        "stated_published_at": { "type": ["string", "null"], "format": "date-time" },
+        "first_capture_at": { "type": "string", "format": "date-time" },
+        "capture_url": { "type": "string", "format": "uri" }
+      }
+    }
+  },
+  "allOf": [
+    {
+      "if": { "properties": { "as_of_basis": { "const": "archive_capture" } }, "required": ["as_of_basis"] },
+      "then": { "required": ["archive"] }
+    },
+    {
+      "if": { "properties": { "source": { "properties": { "adapter": { "const": "edgar" } } } } },
+      "then": { "properties": { "as_of_basis": { "const": "edgar_acceptance" } } }
+    }
+  ]
+}

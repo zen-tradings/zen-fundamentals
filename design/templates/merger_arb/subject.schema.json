@@ -1,0 +1,35 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://raw.githubusercontent.com/zen-tradings/zen-fundamentals/main/design/templates/merger_arb/subject.schema.json",
+  "title": "merger_arb subject (sketch)",
+  "description": "Shape of thesis.subject for merger_arb: one announced deal. Sketch template proving the RFC-009 contract; not shipped.",
+  "type": "object",
+  "required": ["target", "acquirers", "announcement"],
+  "additionalProperties": false,
+  "properties": {
+    "target": { "allOf": [{ "$ref": "#/$defs/Party" }], "required": ["cik", "ticker"], "description": "US-listed SEC registrant." },
+    "acquirers": { "type": "array", "minItems": 1, "items": { "$ref": "#/$defs/Party" } },
+    "announcement": {
+      "type": "object",
+      "required": ["as_of"],
+      "additionalProperties": false,
+      "properties": {
+        "as_of": { "type": "string", "format": "date-time" },
+        "accession": { "type": "string", "pattern": "^[0-9]{10}-[0-9]{2}-[0-9]{6}$" }
+      }
+    },
+    "structure": { "enum": ["merger", "tender_offer", "two_step"] }
+  },
+  "$defs": {
+    "Party": {
+      "type": "object",
+      "required": ["name"],
+      "additionalProperties": false,
+      "properties": {
+        "name": { "type": "string" },
+        "cik": { "type": "string", "pattern": "^[0-9]{10}$" },
+        "ticker": { "type": "string" }
+      }
+    }
+  }
+}

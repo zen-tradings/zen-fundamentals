@@ -1,0 +1,18 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://raw.githubusercontent.com/zen-tradings/zen-fundamentals/main/design/templates/merger_arb/eval-metrics.schema.json",
+  "title": "merger_arb template metrics (sketch)",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "close_brier_announcement": { "$ref": "../../schemas/core/eval-result-row.schema.json#/$defs/Estimate" },
+    "close_brier_checkpoints": { "$ref": "../../schemas/core/eval-result-row.schema.json#/$defs/Estimate" },
+    "close_bss": { "$ref": "../../schemas/core/eval-result-row.schema.json#/$defs/Estimate" },
+    "scenario_brier_checkpoints": { "$ref": "../../schemas/core/eval-result-row.schema.json#/$defs/Estimate" },
+    "scenario_value_rel_error": { "$ref": "../../schemas/core/eval-result-row.schema.json#/$defs/Summary" },
+    "close_date_abs_error_days": { "$ref": "../../schemas/core/eval-result-row.schema.json#/$defs/Summary" },
+    "condition_recall_last": { "$ref": "../../schemas/core/eval-result-row.schema.json#/$defs/Estimate" },
+    "condition_status_accuracy_last": { "$ref": "../../schemas/core/eval-result-row.schema.json#/$defs/Estimate" },
+    "delta_vs_market_brier": { "$ref": "../../schemas/core/eval-result-row.schema.json#/$defs/Estimate" }
+  }
+}

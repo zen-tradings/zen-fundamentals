@@ -1,0 +1,19 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://raw.githubusercontent.com/zen-tradings/zen-fundamentals/main/design/templates/neocloud_deal/params.schema.json",
+  "title": "neocloud_deal parameters",
+  "description": "thesis.policy.template_params for neocloud_deal (RFC-008).",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "stake_min_pct": { "type": "number", "exclusiveMinimum": 0, "maximum": 1, "default": 0.05 },
+    "stake_min_usd": { "type": "number", "exclusiveMinimum": 0, "default": 1000000000 },
+    "structure_link_window_days": { "type": "integer", "minimum": 1, "default": 90 },
+    "prior_gap_flag": {
+      "type": "number",
+      "exclusiveMinimum": 1,
+      "default": 3.0,
+      "description": "Odds ratio between agent and reference prior on p_acquired above which an investor judgment item is raised."
+    }
+  }
+}

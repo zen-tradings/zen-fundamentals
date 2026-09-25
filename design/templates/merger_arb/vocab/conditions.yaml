@@ -1,0 +1,16 @@
+# Condition vocabulary for merger_arb (sketch). Keys are canonical so replay can compute recall by key.
+conditions:
+  "regulatory:hsr":                     { type: regulatory }
+  "regulatory:ec":                      { type: regulatory }
+  "regulatory:cma":                     { type: regulatory }
+  "regulatory:samr":                    { type: regulatory }
+  "regulatory:<iso-country>:<agency>":  { type: regulatory }
+  "regulatory:cfius":                   { type: regulatory }
+  "regulatory:sector:<agency>":         { type: regulatory }
+  "vote:target_shareholders":           { type: shareholder_vote }
+  "vote:acquirer_shareholders":         { type: shareholder_vote }
+  "tender:minimum_condition":           { type: other }
+  "financing:debt":                     { type: financing }
+  "financing:equity":                   { type: financing }
+  "other:<slug>":                       { type: other }
+statuses: [pending, satisfied, waived, failed, not_applicable]

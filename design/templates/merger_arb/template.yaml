@@ -1,0 +1,117 @@
+# merger_arb template manifest — SKETCH, not shipped.
+# Standing proof of the RFC-009 contract: a second deal type with different quantity types
+# (scenario_set, condition_list, facts) and a market-implied baseline, added with no core edits.
+# Question: once a deal is announced, will it close as announced, be renegotiated, or terminate, and when?
+id: merger_arb
+version: 0.1.0
+status: sketch
+core: ">=1.0 <2.0"
+
+subject_schema: subject.schema.json
+values_schema: values.schema.json
+params_schema: params.schema.json
+sources_allowed: [edgar, press_release, web_search, market_data]
+
+parties:
+  keys_from: null            # no per-party outcome keys; outcomes are fixed
+outcomes_keys: [completed_as_announced, renegotiated, terminated]
+
+quantities:
+  scenarios:           { type: scenario_set, required: true, keys: [completed_as_announced, renegotiated, terminated], value: target_price_per_share }
+  close_probability:   { type: derived_probability, required: true, derived_from: scenarios, formula: "P(completed_as_announced) + P(renegotiated)" }
+  expected_close_date: { type: date_estimate, required: true, conditional_on: completion, bounds: [clock, key_terms.outside_date.current] }
+  conditions:          { type: condition_list, required: true, vocabulary: vocab/conditions.yaml }
+  key_terms:           { type: facts, required: true, groups: [consideration, price_per_share, break_fee, outside_date] }
+
+outcomes:
+  anchor: { from: subject.announcement.as_of }
+  completed:
+    quantity: scenarios
+    definition: "Target acquired by the named acquirer(s); completed_as_announced if consideration type, per-share price, and exchange ratio are unchanged from signing, else renegotiated."
+    resolves: thesis
+    evidence: ["8-K 2.01 completion", "Form 25 / Form 15 after closing", "closing press release"]
+  terminated:
+    quantity: scenarios
+    definition: "Agreement terminated, or the target acquired by a different acquirer."
+    resolves: thesis
+    evidence: ["8-K 1.02 referencing the merger agreement", "termination press release"]
+
+dependencies:
+  conditions: [scenarios, expected_close_date]
+  key_terms: [scenarios]
+  scenarios: [close_probability]
+
+impact_rules:
+  - { match: "document amending the merger agreement (8-K 1.01 'Amendment')", affects: [key_terms, scenarios, conditions] }
+  - { match: "text: second request | Phase II | Phase 2 | CFIUS investigation | complaint | injunction", affects: [conditions, scenarios, expected_close_date] }
+  - { match: "8-K 5.07 vote results", affects: [conditions, scenarios] }
+  - { match: "SC TO-T/A extending expiration", affects: [expected_close_date] }
+  - { match: "8-K 1.02 or 2.01", affects: all, resolution: true }
+
+scheduled_reestimate:
+  days: null                 # evidence-driven; an outside-date trigger is an open question in RFC-005
+
+self_checks:
+  - { name: term_arithmetic, method: code, rule: "headline price consistent with consideration at the reference price (within collar)", tolerance: "0.5% or 0.01" }
+  - { name: completed_value_vs_consideration, method: code, rule: "completed scenario value matches consideration value", tolerance: "2%" }
+  - { name: date_before_outside_date, method: code, rule: "expected_close_date <= current outside date, or an extension is cited" }
+  - { name: condition_consistency, method: model, rule: "condition statuses agree with scenario probabilities" }
+
+audit:
+  secondary_only: false
+
+degrade_order: [drop_secondary, skip_dependency_only, hold]
+
+thresholds:
+  scenarios:           { prob_abs: 0.05, value_rel: 0.05 }
+  close_probability:   { abs: 0.05 }
+  expected_close_date: { days: 14 }
+  conditions:          { "on": [added, removed, status_changed] }
+  key_terms:           { "on": any }
+
+params:
+  market_gap_flag: 0.15
+
+baseline:
+  id: mi-1
+  description: "Market-implied completion probability from the deal spread: p = (S − D) / (V − D), clipped to [0, 1]."
+  inputs_schema: baseline.schema.json
+  values: [close_probability]
+  gap_flag: { quantity: close_probability, abs_param: market_gap_flag }
+
+routing:
+  planner:   { tier: strongest }
+  estimator: { tier: strongest, same_route_as: planner }
+  extractor: { tier: low_cost, schema_strict: true }
+  auditor:   { tier: low_cost, provider_must_differ_from: estimator }
+
+packet_layout:
+  - header
+  - { scenario_table: scenarios, derived: [close_probability], baseline: true }
+  - { list_changes: conditions }
+  - { date_change: expected_close_date }
+  - { facts_changes: key_terms }
+  - conflicts
+  - uncertain_items
+  - investor_judgment_items
+  - self_check_and_recoveries
+  - evidence_appendix
+
+judgment_prompts:
+  - "Will the acquirer accept remedies beyond the agreement's divestiture cap?"
+  - "Is a political or national-security objection likely to become formal action?"
+  - "Is a topping bid plausible given the background-of-the-merger disclosures?"
+
+extraction_targets:
+  merger_agreement@1: { docs: ["8-K 1.01", "EX-2.1"], extracts: [consideration, price, collar, cvr, break_fees, outside_date, closing_conditions, efforts_covenant] }
+  proxy@1:            { docs: [PREM14A, DEFM14A, S-4], extracts: [conditions_status, regulatory_filings, timing_statements, background] }
+  tender@1:           { docs: [SC TO-T, SC 14D9], extracts: [offer_terms, minimum_condition, expiration, tendered_shares] }
+
+eval:
+  spec: eval.md
+  metrics_schema: eval-metrics.schema.json
+  scores:
+    scenarios:           [multiclass_brier, value_error]
+    close_probability:   [brier, bss, calibration, vs_baseline]
+    expected_close_date: [abs_error, bias]
+    conditions:          [recall_precision, status_accuracy]

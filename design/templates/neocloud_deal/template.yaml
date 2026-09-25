@@ -1,0 +1,158 @@
+# neocloud_deal template manifest (RFC-009 contract; rationale in RFC-008).
+# Who acquires, or takes a strategic equity stake in, one neocloud within a fixed horizon.
+id: neocloud_deal
+version: 1.0.0
+core: ">=1.0 <2.0"
+rationale: ../../rfc/008-neocloud-deal-template.md
+
+subject_schema: subject.schema.json
+values_schema: values.schema.json
+params_schema: params.schema.json
+sources_allowed: [edgar, press_release, news, web_search]
+
+parties:
+  keys_from: subject.candidates[].key
+  reserved: [other, none]
+
+quantities:
+  acquirer_distribution:      { type: outcome_distribution, required: true, keys: [parties, other, none] }
+  p_acquired:                 { type: derived_probability, required: true, derived_from: acquirer_distribution, formula: "1 - P(none)" }
+  stake_probabilities:        { type: probability_map, required: true, keys: [parties], labels: [structure] }
+  expected_announcement_date: { type: date_estimate, required: true, conditional_on: acquisition_in_horizon, bounds: [clock, subject.horizon.end] }
+  relationships:              { type: relationship_list, required: true, vocabulary: vocab/relationships.yaml, labels: [structure] }
+  signals:                    { type: signal_list, required: true, vocabulary: vocab/signals.yaml }
+  target_facts:               { type: facts, required: true, groups: [listing, control, capital, capacity, customer_concentration] }
+
+labels:
+  structure:
+    values: [vendor_financing, capacity_backstop, customer_equity_kicker, pure_equity, arms_length, undetermined]
+    precedence: [vendor_financing, capacity_backstop, customer_equity_kicker]
+    applies_to: [stake_probabilities, "relationships[type in (equity, debt)]"]
+    requires_link:
+      vendor_financing: [gpu_supply, "other:supply"]
+      capacity_backstop: [capacity_backstop]
+      customer_equity_kicker: [compute_contract]
+    window_param: structure_link_window_days
+
+outcomes:
+  horizon: { from: subject.horizon }
+  acquisition:
+    quantity: acquirer_distribution
+    definition: "Announcement of a definitive agreement transferring control (>50% voting power, or substantially all equity or operating assets). First announcement in the horizon counts; later termination does not undo it."
+    resolves: thesis
+    evidence: ["8-K 1.01 with 'Agreement and Plan of Merger' naming the target", "press release announcing an agreement to acquire the target"]
+  stake:
+    quantity: stake_probabilities
+    definition: "A party's disclosed beneficial ownership crosses stake_min_pct (vested or exercisable within 60 days), or a single new investment >= stake_min_usd. An acquisition by the party also counts."
+    resolves: key
+    evidence: ["SC 13D / SC 13G by a candidate on the target", "primary disclosure of a candidate investment", "disclosure that milestone warrants vested"]
+  horizon_end: { acquisition: none, stake: 0 }
+  target_ceased: { acquisition: none, reason: target_ceased }
+
+dependencies:
+  relationships: [acquirer_distribution, stake_probabilities]
+  signals: [acquirer_distribution, stake_probabilities, expected_announcement_date]
+  target_facts: [acquirer_distribution, stake_probabilities, expected_announcement_date]
+  acquirer_distribution: [p_acquired, expected_announcement_date]
+
+impact_rules:
+  - { match: "acquisition agreement or announcement naming the target", affects: all, resolution: true }
+  - { match: "SC 13D / SC 13G by a candidate, or primary disclosure of a candidate investment", affects: [relationships, stake_probabilities, acquirer_distribution], resolution: if_threshold_met }
+  - { match: "SC 13D Item 4 mentions control, merger, acquisition, or board", affects: [signals, acquirer_distribution] }
+  - { match: "text: strategic alternatives | exploring a sale | financial advisor", affects: [signals, acquirer_distribution, expected_announcement_date] }
+  - { match: "S-1 filing, IPO pricing, or IPO withdrawal", affects: [target_facts, signals, acquirer_distribution] }
+  - { match: "8-K 1.01 compute contract with a candidate", affects: [relationships, acquirer_distribution, stake_probabilities] }
+  - { match: "supply, compute, or backstop agreement within structure_link_window_days of the same candidate's equity or debt", affects: [relationships, acquirer_distribution, stake_probabilities] }
+  - { match: "milestone warrants vested", affects: [relationships, stake_probabilities], resolution: if_threshold_met }
+  - { match: "news naming the target and a candidate with talks | in discussions | weighing | nearing a deal", affects: [signals, acquirer_distribution, stake_probabilities] }
+
+scheduled_reestimate:
+  days: 30
+  quantities: [acquirer_distribution, stake_probabilities, expected_announcement_date]
+
+self_checks:
+  - { name: stake_ge_acquisition, method: code, rule: "stake_probabilities[k] >= acquirer_distribution[k] for every party", tolerance: 1.0e-6 }
+  - { name: date_in_horizon, method: code, rule: "expected_announcement_date in [clock, horizon.end]" }
+  - { name: structure_links, method: code, rule: "every structure label outside pure_equity/arms_length/undetermined links a relationship of the required type" }
+  - { name: relationship_consistency, method: model, rule: "relationship statuses agree with each party's rationale" }
+
+audit:
+  secondary_only: true
+
+degrade_order: [drop_low_reliability_secondary, skip_dependency_only, drop_normal_news_unlinked_to_talks, hold]
+
+thresholds:
+  acquirer_distribution:      { logit_abs: 0.7, prob_abs_min: 0.02, on_top_rank_change: true }
+  p_acquired:                 { logit_abs: 0.7, prob_abs_min: 0.02 }
+  stake_probabilities:        { logit_abs: 0.7, prob_abs_min: 0.02 }
+  expected_announcement_date: { days: 45 }
+  relationships:              { "on": [added, removed, status_changed, value_changed, label_changed] }
+  signals:                    { "on": [added, status_changed] }
+  target_facts:               { "on": [listing, control, customer_concentration] }
+
+params:
+  stake_min_pct: 0.05
+  stake_min_usd: 1000000000
+  structure_link_window_days: 90
+  prior_gap_flag: 3.0
+
+baseline:
+  id: rp-1
+  description: "Rule-based reference prior from shared extractions: base rate by listing status, allocated by relationship weights."
+  inputs_schema: baseline.schema.json
+  values: [acquirer_distribution, p_acquired, stake_probabilities]
+  gap_flag: { quantity: p_acquired, odds_ratio_param: prior_gap_flag, also_on_top_rank_change: true }
+
+routing:
+  planner:   { tier: strongest }
+  estimator: { tier: strongest, same_route_as: planner }
+  extractor: { tier: low_cost, schema_strict: true }
+  auditor:   { tier: low_cost, provider_must_differ_from: estimator }
+  alternates:
+    extractor: { tier: low_cost, provider_must_differ_from: extractor }
+    auditor:   { tier: low_cost, provider_must_differ_from: estimator }
+  provider_conflicts: flag       # candidates may be model providers; flag, never block
+
+packet_layout:
+  - header
+  - { distribution_table: acquirer_distribution, derived: [p_acquired], baseline: true }
+  - { map_table: stake_probabilities, labels: [structure], baseline: true }
+  - { list_changes: signals }
+  - { list_changes: relationships, labels: [structure], show_parties_without_items: true }
+  - { date_change: expected_announcement_date }
+  - { facts_changes: target_facts }
+  - conflicts
+  - uncertain_items
+  - investor_judgment_items
+  - self_check_and_recoveries
+  - evidence_appendix
+
+judgment_prompts:
+  - "Is this candidate more likely to keep buying capacity by contract than to buy the company?"
+  - "Would antitrust or foreign-investment review plausibly block this candidate from acquiring a key supplier or customer?"
+  - "Does founder or dual-class control make a sale unlikely at any price?"
+  - "Is a reported-talks item credible, given the outlet's record and any denial?"
+  - "Can this candidate fund an acquisition of this size?"
+  - "This candidate's equity is labeled vendor_financing, capacity_backstop, or customer_equity_kicker. Is it a way to sell product or secure capacity, or the first step toward owning the target?"
+
+extraction_targets:
+  target_filings@1:    { docs: [S-1, F-1, 10-K, 20-F, 10-Q], extracts: [customers, concentration, backlog, material_contracts, capacity, debt_and_change_of_control, principal_stockholders, voting_control, related_party, investor_supplier_customer_terms] }
+  candidate_filings@1: { docs: [10-K, 10-Q], extracts: [target_mentions, commitments, investments, capex_guidance, self_built_capacity] }
+  ownership@1:         { docs: [SC 13D, SC 13G], extracts: [filer, ownership_pct, event_date, item4_purpose] }
+  form_d@1:            { docs: [D], extracts: [amount_sold, first_sale_date, investor_count] }
+  agreements@1:        { docs: ["8-K 1.01", "8-K 2.01", "8-K 3.02", "8-K 5.02", DEF 14A], extracts: [agreements, completions, equity_sales, leadership, ownership_table] }
+  releases@1:          { docs: [press_release], extracts: [contracts, investments, capacity, financing, strategic_review, acquisitions] }
+  news@1:              { docs: [news_article], extracts: [reported_talks, denials, reported_valuations, reported_investments] }
+
+eval:
+  spec: eval.md
+  metrics_schema: eval-metrics.schema.json
+  scores:                          # RFC-007 §4.1 metric families per scored quantity
+    acquirer_distribution:      [multiclass_log_loss, multiclass_brier, rank_topk, lead_time, calibration, vs_baseline]
+    p_acquired:                 [brier, bss]
+    stake_probabilities:        [brier, bss, log_loss, rank_topk, lead_time, calibration, vs_baseline]
+    expected_announcement_date: [abs_error]
+    relationships:              [recall_precision, label_accuracy]
+
+on_resolution:
+  - { when: { acquisition: "any key except none" }, offer: { template: merger_arb, from: acquisition_announcement } }

@@ -1,0 +1,25 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://raw.githubusercontent.com/zen-tradings/zen-fundamentals/main/design/templates/merger_arb/baseline.schema.json",
+  "title": "merger_arb comparison baseline inputs (mi-1)",
+  "description": "Inputs of the market-implied completion probability mi-1, stored in comparison_baseline.inputs. comparison_baseline.values holds close_probability.",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "price_session_date": { "type": "string", "format": "date" },
+    "S_t": { "type": "number" },
+    "A_t": { "type": "number" },
+    "V_t": { "type": "number" },
+    "D_t": { "type": "number" },
+    "S_u": { "type": "number" },
+    "M_u": { "type": "number" },
+    "M_t": { "type": "number" },
+    "r_t": { "type": "number" },
+    "tau_years": { "type": "number", "minimum": 0 },
+    "unaffected_date": { "type": "string", "format": "date" },
+    "evidence_ids": {
+      "type": "array",
+      "items": { "$ref": "../../schemas/core/quantity-types.schema.json#/$defs/EvidenceId" }
+    }
+  }
+}

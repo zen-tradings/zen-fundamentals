@@ -1,0 +1,221 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://raw.githubusercontent.com/zen-tradings/zen-fundamentals/main/design/schemas/core/thesis-version.schema.json",
+  "title": "ThesisVersion",
+  "description": "An immutable snapshot of every tracked quantity at a clock, with provenance (RFC-004). Template-agnostic envelope: values and comparison_baseline.inputs are validated against the pinned template in stage two (RFC-009). Everything except review_state is covered by content_hash. review_state is derived from the append-only review_events log.",
+  "type": "object",
+  "required": ["id", "thesis_id", "seq", "parent_version_id", "spec_revision", "template", "clock", "trigger", "evidence_set", "values", "deltas", "carried_forward", "self_check", "recoveries", "review_packet_id", "routing", "cost", "latency_ms", "created_at", "content_hash"],
+  "additionalProperties": false,
+  "properties": {
+    "id": { "type": "string", "pattern": "^tv_[a-z0-9]{16,64}$" },
+    "thesis_id": { "type": "string" },
+    "seq": {
+      "type": "integer",
+      "minimum": 1,
+      "description": "Monotonic per thesis; allocated inside the fenced commit transaction (RFC-003)."
+    },
+    "parent_version_id": { "type": ["string", "null"], "description": "Approved head this version was diffed against. Null for the initial version." },
+    "supersedes": { "type": ["string", "null"], "description": "Pending candidate this version superseded, if any (RFC-004)." },
+    "spec_revision": { "type": "integer", "minimum": 1 },
+    "template": {
+      "type": "object",
+      "required": ["id", "version"],
+      "additionalProperties": false,
+      "properties": {
+        "id": { "type": "string" },
+        "version": { "type": "string", "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$" }
+      }
+    },
+    "clock": {
+      "type": "string",
+      "format": "date-time",
+      "description": "Point-in-time bound. No evidence with as_of > clock influenced this version."
+    },
+    "trigger": {
+      "type": "object",
+      "required": ["kind", "evidence_ids"],
+      "additionalProperties": false,
+      "properties": {
+        "kind": { "enum": ["initial", "evidence", "scheduled", "manual", "spec_revision", "resolution"] },
+        "evidence_ids": { "type": "array", "items": { "$ref": "#/$defs/EvidenceId" }, "description": "Empty for scheduled." }
+      }
+    },
+    "evidence_set": {
+      "type": "object",
+      "required": ["ids", "hash", "max_as_of"],
+      "additionalProperties": false,
+      "properties": {
+        "ids": { "type": "array", "items": { "$ref": "#/$defs/EvidenceId" }, "uniqueItems": true },
+        "hash": {
+          "type": "string",
+          "pattern": "^sha256:[0-9a-f]{64}$",
+          "description": "Hash of the sorted ids; part of the idempotency key (RFC-005)."
+        },
+        "max_as_of": { "type": "string", "format": "date-time", "description": "Must be <= clock." }
+      }
+    },
+    "values": {
+      "type": "object",
+      "description": "Keyed by quantity name; each value has its quantity's core type (quantity-types.schema.json). Validated against templates/<id>/values.schema.json (stage two).",
+      "propertyNames": { "pattern": "^[a-z][a-z0-9_]{1,63}$" }
+    },
+    "deltas": { "type": "array", "items": { "$ref": "#/$defs/Delta" } },
+    "carried_forward": {
+      "type": "array",
+      "items": { "type": "string" },
+      "uniqueItems": true,
+      "description": "Quantities not re-estimated in this evaluation; values copied from the parent."
+    },
+    "comparison_baseline": { "$ref": "#/$defs/ComparisonBaseline" },
+    "self_check": { "$ref": "#/$defs/SelfCheck" },
+    "recoveries": { "type": "array", "items": { "$ref": "#/$defs/RecoveryEvent" } },
+    "review_packet_id": { "type": "string", "pattern": "^rp_[a-z0-9]{16,64}$" },
+    "routing": {
+      "type": "object",
+      "required": ["planner", "estimator", "extractor", "auditor"],
+      "additionalProperties": false,
+      "properties": {
+        "planner": { "$ref": "#/$defs/ModelRef" },
+        "estimator": { "$ref": "#/$defs/ModelRef" },
+        "extractor": { "$ref": "#/$defs/ModelRef" },
+        "auditor": {
+          "anyOf": [{ "$ref": "#/$defs/ModelRef" }, { "type": "null" }],
+          "description": "Null only in the no-auditor ablation (RFC-007 A2)."
+        },
+        "provider_conflicts": {
+          "type": "array",
+          "description": "Roles whose model provider is also a party named in the subject. Flag only; never blocks the route (RFC-009).",
+          "items": {
+            "type": "object",
+            "required": ["role", "party"],
+            "additionalProperties": false,
+            "properties": {
+              "role": { "enum": ["planner", "estimator", "extractor", "auditor"] },
+              "party": { "$ref": "quantity-types.schema.json#/$defs/Key" }
+            }
+          }
+        }
+      }
+    },
+    "cost": {
+      "type": "object",
+      "required": ["usd"],
+      "additionalProperties": false,
+      "properties": {
+        "usd": { "type": "number", "minimum": 0 },
+        "input_tokens": { "type": "integer", "minimum": 0 },
+        "output_tokens": { "type": "integer", "minimum": 0 },
+        "reasoning_tokens": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "latency_ms": { "type": "integer", "minimum": 0 },
+    "created_at": { "type": "string", "format": "date-time" },
+    "content_hash": { "type": "string", "pattern": "^sha256:[0-9a-f]{64}$" },
+    "review_state": {
+      "readOnly": true,
+      "enum": ["needs_review", "approved", "rejected", "superseded"],
+      "description": "Not part of content_hash. Derived from review_events."
+    }
+  },
+  "$defs": {
+    "EvidenceId": { "$ref": "quantity-types.schema.json#/$defs/EvidenceId" },
+    "ModelRef": {
+      "type": "object",
+      "required": ["provider", "model_id", "role"],
+      "additionalProperties": false,
+      "properties": {
+        "provider": { "type": "string" },
+        "model_id": { "type": "string" },
+        "role": { "enum": ["planner", "estimator", "extractor", "auditor", "eval_judge"] },
+        "route": { "enum": ["primary", "alternate"], "default": "primary" }
+      }
+    },
+    "Delta": {
+      "type": "object",
+      "required": ["quantity", "quantity_type", "changed", "material"],
+      "additionalProperties": false,
+      "properties": {
+        "quantity": { "type": "string", "description": "Template quantity name." },
+        "quantity_type": {
+          "enum": ["probability", "derived_probability", "outcome_distribution", "probability_map", "scenario_set", "date_estimate", "condition_list", "relationship_list", "signal_list", "facts"]
+        },
+        "changed": { "type": "boolean" },
+        "material": { "type": "boolean" },
+        "rule": {
+          "type": "string",
+          "description": "Rule that fired, e.g. '<quantity>.logit_abs>=0.7 (<key>)' or '<quantity>.top_rank_change'."
+        },
+        "detail": {
+          "type": "object",
+          "description": "Typed by quantity_type. probability: {abs, logit}; outcome_distribution / probability_map: {per_key[{key, abs, logit}], top_rank{from, to}, resolved[]}; scenario_set: {per_outcome[{outcome, prob_abs, value_rel}]}; date_estimate: {days}; *_list: {added[], removed[], status_changed[{key, from, to}], value_changed[], label_changed[{key, set, from, to}]}; facts: {groups[]}."
+        }
+      }
+    },
+    "ComparisonBaseline": {
+      "type": "object",
+      "description": "The template's comparison baseline (RFC-009), e.g. a market-implied probability or a rule-based prior. Reference only: not a tracked quantity, not an estimator input, never gates.",
+      "required": ["id", "formula_version", "values"],
+      "additionalProperties": false,
+      "properties": {
+        "id": { "type": "string", "description": "Baseline id from the template manifest." },
+        "formula_version": { "type": "string" },
+        "weights_version": { "type": "string", "description": "For fitted baselines: the template version the weights were fit for." },
+        "values": {
+          "type": "object",
+          "description": "Keyed by quantity name, in the quantity's core type; null where undefined.",
+          "propertyNames": { "pattern": "^[a-z][a-z0-9_]{1,63}$" }
+        },
+        "null_reason": { "type": "string" },
+        "flags": { "type": "array", "items": { "type": "string" }, "uniqueItems": true },
+        "inputs": { "type": "object", "description": "Validated against templates/<id>/baseline.schema.json (stage two)." },
+        "evidence_ids": { "type": "array", "items": { "$ref": "#/$defs/EvidenceId" } }
+      }
+    },
+    "SelfCheck": {
+      "type": "object",
+      "required": ["passed", "revised", "checks"],
+      "additionalProperties": false,
+      "properties": {
+        "passed": { "type": "boolean" },
+        "revised": { "type": "boolean", "description": "True if the estimator used its one revision." },
+        "checks": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["name", "origin", "method", "passed"],
+            "additionalProperties": false,
+            "properties": {
+              "name": {
+                "type": "string",
+                "pattern": "^[a-z][a-z0-9_]{1,63}$",
+                "description": "Core checks: type_invariants, derivation, citation_coverage, elapsed_time_claim, as_of_le_clock, narrative_consistency. Template checks: as listed in the manifest's self_checks."
+              },
+              "origin": { "enum": ["core", "template"] },
+              "method": { "enum": ["code", "model"] },
+              "passed": { "type": "boolean" },
+              "passed_after_revision": { "type": "boolean" },
+              "detail": { "type": "string" }
+            }
+          }
+        }
+      }
+    },
+    "RecoveryEvent": {
+      "type": "object",
+      "required": ["step", "tool_or_route", "error_class", "attempts", "path", "outcome"],
+      "additionalProperties": false,
+      "properties": {
+        "step": { "enum": ["ingest", "impact", "extract", "estimate", "self_check", "audit"] },
+        "tool_or_route": { "type": "string" },
+        "error_class": {
+          "enum": ["fetch_5xx", "fetch_timeout", "rate_limited", "malformed_document", "extractor_malformed", "extractor_timeout", "route_outage", "other"]
+        },
+        "attempts": { "type": "integer", "minimum": 1 },
+        "path": { "type": "string", "pattern": "^(retry|alternate:[A-Za-z0-9._-]+|degraded|failed)$" },
+        "outcome": { "enum": ["recovered", "degraded", "failed"] },
+        "latency_ms": { "type": "integer", "minimum": 0 },
+        "injected": { "type": "boolean", "description": "Set by the RFC-007 fault-injection harness only." }
+      }
+    }
+  }
+}

@@ -1,0 +1,33 @@
+# Example neocloud_deal thesis (fictional target). Validated by design/check.py in two stages:
+# the core thesis schema, then this template's subject and params schemas.
+id: who-buys-gridcompute
+template: { id: neocloud_deal, version: 1.0.0 }
+subject:
+  target: { name: "GridCompute Inc.", listing: private, cik: "0000000001" }
+  candidates:
+    - { key: anthropic, name: "Anthropic PBC",   type: ai_lab }
+    - { key: openai,    name: "OpenAI",          type: ai_lab }
+    - { key: microsoft, name: "Microsoft Corp.", ticker: MSFT, type: hyperscaler }
+    - { key: nvidia,    name: "NVIDIA Corp.",    ticker: NVDA, type: chipmaker }
+  horizon: { start: "2026-10-01T00:00:00Z", end: "2027-09-30" }
+sources:
+  - type: edgar
+    ciks: ["0000000001"]
+    related_tickers: [MSFT, NVDA]
+    forms: ["8-K", "10-K", "10-Q", "S-1", "SC 13D", "SC 13G", "D"]
+  - type: press_release
+    issuers: [gridcompute, anthropic, openai, microsoft, nvidia]
+  - type: news
+    outlets: [reuters, bloomberg, the-information]
+  - type: web_search
+    queries: ["GridCompute acquisition"]
+policy:
+  material_change:
+    acquirer_distribution: { logit_abs: 0.7, prob_abs_min: 0.02 }
+    stake_probabilities:   { logit_abs: 0.7, prob_abs_min: 0.02 }
+  template_params: { stake_min_usd: 1000000000 }
+  budget_usd_per_evaluation: 1.00
+  max_latency_s: 600
+  review: required
+delivery:
+  webhook: { url: "https://example.com/hook", "on": [version_approved] }

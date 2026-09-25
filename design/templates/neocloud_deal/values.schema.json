@@ -1,0 +1,182 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://raw.githubusercontent.com/zen-tradings/zen-fundamentals/main/design/templates/neocloud_deal/values.schema.json",
+  "title": "neocloud_deal values",
+  "description": "Shape of ThesisVersion.values for neocloud_deal (RFC-008), composed from core quantity types plus template constraints. Key validity (candidate keys, vocabularies) and cross-quantity rules (sums, stake >= acquisition) are checked by stage-two validation and the self-check.",
+  "type": "object",
+  "required": ["acquirer_distribution", "p_acquired", "stake_probabilities", "expected_announcement_date", "relationships", "signals", "target_facts"],
+  "additionalProperties": false,
+  "properties": {
+    "acquirer_distribution": {
+      "allOf": [
+        { "$ref": "../../schemas/core/quantity-types.schema.json#/$defs/outcome_distribution" },
+        {
+          "minItems": 3,
+          "maxItems": 14,
+          "contains": { "properties": { "key": { "const": "other" } } }
+        },
+        {
+          "contains": { "properties": { "key": { "const": "none" } } }
+        }
+      ],
+      "description": "One entry per candidate key plus other and none."
+    },
+    "p_acquired": {
+      "allOf": [
+        { "$ref": "../../schemas/core/quantity-types.schema.json#/$defs/derived_probability" },
+        {
+          "properties": { "derived_from": { "const": "acquirer_distribution" }, "formula": { "const": "1 - P(none)" } }
+        }
+      ]
+    },
+    "stake_probabilities": {
+      "allOf": [
+        { "$ref": "../../schemas/core/quantity-types.schema.json#/$defs/probability_map" },
+        {
+          "maxItems": 12,
+          "items": {
+            "properties": {
+              "labels": {
+                "properties": { "structure": { "$ref": "#/$defs/StakeStructure" } }
+              }
+            },
+            "if": { "properties": { "resolved": { "const": true } } },
+            "then": {
+              "properties": { "probability": { "const": 1 }, "labels": { "required": ["structure"] } },
+              "required": ["labels"]
+            }
+          }
+        }
+      ],
+      "description": "One entry per candidate. A resolved stake has probability 1 and a structure label."
+    },
+    "expected_announcement_date": {
+      "allOf": [
+        { "$ref": "../../schemas/core/quantity-types.schema.json#/$defs/date_estimate" },
+        {
+          "properties": { "conditional_on": { "const": "acquisition_in_horizon" } }
+        }
+      ]
+    },
+    "relationships": {
+      "allOf": [
+        { "$ref": "../../schemas/core/quantity-types.schema.json#/$defs/relationship_list" },
+        {
+          "items": {
+            "properties": {
+              "key": {
+                "pattern": "^(compute_contract|gpu_supply|equity|debt|capacity_backstop|board|partnership|other:[a-z0-9_-]+):[a-z][a-z0-9_]{0,31}(:[a-z0-9_-]+)?$"
+              },
+              "type": {
+                "enum": ["compute_contract", "gpu_supply", "equity", "debt", "capacity_backstop", "board", "partnership", "other"]
+              },
+              "role": { "enum": ["customer", "supplier", "investor", "lender", "partner", "other"] },
+              "labels": {
+                "properties": { "structure": { "$ref": "#/$defs/StakeStructure" } }
+              }
+            },
+            "if": {
+              "properties": { "type": { "enum": ["equity", "debt"] } }
+            },
+            "then": {
+              "required": ["labels"],
+              "properties": { "labels": { "required": ["structure"] } }
+            }
+          }
+        }
+      ],
+      "description": "Vocabulary in vocab/relationships.yaml. Equity and debt items carry a structure label."
+    },
+    "signals": {
+      "allOf": [
+        { "$ref": "../../schemas/core/quantity-types.schema.json#/$defs/signal_list" },
+        {
+          "items": {
+            "properties": {
+              "key": {
+                "pattern": "^(strategic_review|talks|talks_denied|concentration|financing|ipo|candidate|control|regulatory|leadership|other)(:[a-z0-9_-]+)*$"
+              }
+            }
+          }
+        }
+      ],
+      "description": "Vocabulary in vocab/signals.yaml."
+    },
+    "target_facts": {
+      "allOf": [
+        { "$ref": "../../schemas/core/quantity-types.schema.json#/$defs/facts" },
+        { "$ref": "#/$defs/TargetFacts" }
+      ]
+    }
+  },
+  "$defs": {
+    "StakeStructure": {
+      "enum": ["vendor_financing", "capacity_backstop", "customer_equity_kicker", "pure_equity", "arms_length", "undetermined"],
+      "description": "Label set 'structure' (RFC-008 Stake structure). Describes the commercial context of equity or debt; never decides whether a stake event happened."
+    },
+    "TargetFacts": {
+      "type": "object",
+      "required": ["listing"],
+      "additionalProperties": false,
+      "properties": {
+        "listing": {
+          "type": "object",
+          "required": ["status"],
+          "additionalProperties": false,
+          "properties": {
+            "status": { "enum": ["private", "ipo_filed", "public"] },
+            "exchange": { "type": "string" },
+            "ticker": { "type": "string" }
+          }
+        },
+        "control": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "voting_control_holder": { "type": "string" },
+            "dual_class": { "type": "boolean" },
+            "change_of_control_provisions": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "required": ["instrument", "description"],
+                "additionalProperties": false,
+                "properties": {
+                  "instrument": { "type": "string", "description": "e.g. credit facility, customer contract" },
+                  "description": { "type": "string" }
+                }
+              }
+            }
+          }
+        },
+        "capital": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "last_valuation": { "$ref": "../../schemas/core/quantity-types.schema.json#/$defs/Money" },
+            "last_valuation_as_of": { "type": "string", "format": "date" },
+            "total_debt": { "$ref": "../../schemas/core/quantity-types.schema.json#/$defs/Money" },
+            "contracted_backlog": { "$ref": "../../schemas/core/quantity-types.schema.json#/$defs/Money" }
+          }
+        },
+        "capacity": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": { "power_mw": { "type": "number", "minimum": 0 }, "accelerators": { "type": "integer", "minimum": 0 } }
+        },
+        "customer_concentration": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "top_customer": {
+              "type": "string",
+              "description": "Candidate key when the top customer is a candidate; otherwise a name or 'undisclosed'."
+            },
+            "top_customer_share": { "type": "number", "minimum": 0, "maximum": 1 },
+            "basis": { "enum": ["revenue", "backlog"] }
+          }
+        }
+      }
+    }
+  }
+}
