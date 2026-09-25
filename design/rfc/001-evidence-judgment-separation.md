@@ -8,7 +8,7 @@ Supersedes: the earlier "shared research layer vs. per-user report layer" draft 
 
 ## Problem
 
-One SEC filing is relevant to many theses. A DEFM14A for a target is read by every thesis that tracks that deal, and an 8-K from a serial acquirer may matter to several open deals at once. If each thesis fetched, parsed, and stored its own copy:
+One SEC filing is relevant to many theses. A neocloud's S-1 is read by every thesis that tracks that company, and a hyperscaler's 10-K that lists several GPU-cloud suppliers may matter to many theses at once. If each thesis fetched, parsed, and stored its own copy:
 
 - the same document would be fetched and normalized N times;
 - two theses could cite slightly different copies of "the same" filing, which breaks auditability;
@@ -27,7 +27,7 @@ Responsibilities:
 - run source adapters (`discover → fetch → normalize`) under the configured priority and trust tiers;
 - assign every item an immutable `as_of` (the publication or filing timestamp, not the time it was retrieved) and a trust tier (`primary` / `secondary`);
 - deduplicate by content hash; link amendments (`8-K/A`, revised press releases) as new items via `amends` rather than editing existing ones;
-- run **document-local extraction**: extraction whose only inputs are one evidence item and a versioned extraction target from a template (for example `merger_arb.key_terms@1`);
+- run **document-local extraction**: extraction whose only inputs are one evidence item and a versioned extraction target from a template (for example `neocloud_deal.relationships@1`);
 - serve a **point-in-time view**: every read takes a `clock` and returns only items with `as_of ≤ clock`.
 
 Objects: `EvidenceItem` ([schema](../schemas/evidence-item.schema.json)) and `Extraction` (an evidence-derived artifact that inherits the `as_of` of its source item).
@@ -75,7 +75,7 @@ The judgment layer has **read-only** access to evidence, and only through the po
 | Raw filing, press release, search hit | Evidence | Same bytes for every citer |
 | `as_of`, tier, source, content hash | Evidence | Needed for point-in-time rules and auditing, and independent of any thesis |
 | Extraction from one document against a template target | Evidence (cached) | Inputs are the document and target only, so it is safe to share and PIT-safe (it inherits the document's `as_of`) |
-| Extraction that needs thesis context (for example "which of the three deals in this 8-K is ours?") | Judgment | Depends on thesis subject |
+| Extraction that needs thesis context (for example "which of the suppliers named in this 10-K is our target?") | Judgment | Depends on thesis subject |
 | Impact assessment, estimates, reconciliation | Judgment | Thesis-specific reasoning |
 | ThesisVersion, ReviewPacket, no-change records | Judgment | Immutable per-thesis history |
 

@@ -38,8 +38,8 @@
         "additionalProperties": false,
         "properties": {
           "quantity": { "$ref": "thesis-version.schema.json#/$defs/Delta/properties/quantity" },
-          "old_value": { "description": "Typed per thesis-version.schema.json#/$defs/MergerArbValues; null for the initial version." },
-          "new_value": { "description": "Typed per thesis-version.schema.json#/$defs/MergerArbValues." },
+          "old_value": { "description": "Typed per thesis-version.schema.json#/$defs/NeocloudDealValues; null for the initial version." },
+          "new_value": { "description": "Typed per thesis-version.schema.json#/$defs/NeocloudDealValues." },
           "delta": { "$ref": "thesis-version.schema.json#/$defs/Delta" },
           "caused_by": {
             "type": "array",
@@ -50,32 +50,56 @@
         }
       }
     },
-    "scenario_table": {
+    "acquirer_table": {
       "type": "array",
-      "description": "Present for templates with a scenario_set quantity.",
+      "description": "Present for templates with a candidate_distribution quantity. One row per key: each candidate, other, none.",
       "items": {
         "type": "object",
-        "required": ["outcome", "new_probability", "new_price"],
+        "required": ["key", "new_probability", "new_rank"],
         "additionalProperties": false,
         "properties": {
-          "outcome": { "$ref": "thesis-version.schema.json#/$defs/Scenario/properties/outcome" },
+          "key": { "$ref": "thesis-version.schema.json#/$defs/OutcomeKey" },
           "old_probability": { "anyOf": [{ "$ref": "thesis-version.schema.json#/$defs/Probability" }, { "type": "null" }] },
           "new_probability": { "$ref": "thesis-version.schema.json#/$defs/Probability" },
-          "old_price": { "anyOf": [{ "$ref": "thesis-version.schema.json#/$defs/Money" }, { "type": "null" }] },
-          "new_price": { "$ref": "thesis-version.schema.json#/$defs/Money" },
+          "old_rank": { "type": ["integer", "null"], "minimum": 1 },
+          "new_rank": { "type": "integer", "minimum": 1 },
+          "delta_abs": { "type": ["number", "null"] },
+          "delta_logit": { "type": ["number", "null"] },
+          "reference_prior": { "anyOf": [{ "$ref": "thesis-version.schema.json#/$defs/Probability" }, { "type": "null" }] },
           "claim_ids": { "type": "array", "items": { "type": "string" } }
         }
       }
     },
-    "market_comparison": {
+    "stake_table": {
+      "type": "array",
+      "description": "Present for templates with a probability_map quantity. One row per candidate.",
+      "items": {
+        "type": "object",
+        "required": ["key", "new_probability", "resolved"],
+        "additionalProperties": false,
+        "properties": {
+          "key": { "$ref": "thesis-version.schema.json#/$defs/CandidateKey" },
+          "old_probability": { "anyOf": [{ "$ref": "thesis-version.schema.json#/$defs/Probability" }, { "type": "null" }] },
+          "new_probability": { "$ref": "thesis-version.schema.json#/$defs/Probability" },
+          "resolved": { "type": "boolean" },
+          "structure": { "$ref": "thesis-version.schema.json#/$defs/StakeStructure", "description": "Set when resolved." },
+          "delta_abs": { "type": ["number", "null"] },
+          "delta_logit": { "type": ["number", "null"] },
+          "reference_prior": { "anyOf": [{ "$ref": "thesis-version.schema.json#/$defs/Probability" }, { "type": "null" }] },
+          "claim_ids": { "type": "array", "items": { "type": "string" } }
+        }
+      }
+    },
+    "prior_comparison": {
       "type": "object",
-      "required": ["agent_close_probability", "market_implied", "flagged"],
+      "required": ["agent_p_acquired", "reference_prior", "flagged"],
       "additionalProperties": false,
       "properties": {
-        "agent_close_probability": { "$ref": "thesis-version.schema.json#/$defs/Probability" },
-        "market_implied": { "$ref": "thesis-version.schema.json#/$defs/MarketImplied" },
-        "gap": { "type": ["number", "null"] },
-        "flagged": { "type": "boolean", "description": "True if |gap| > market_gap_flag; an investor judgment item is then added." }
+        "agent_p_acquired": { "$ref": "thesis-version.schema.json#/$defs/Probability" },
+        "reference_prior": { "$ref": "thesis-version.schema.json#/$defs/ReferencePrior" },
+        "odds_ratio": { "type": ["number", "null"], "description": "odds(agent p_acquired) / odds(prior p_acquired)." },
+        "top_candidate_differs": { "type": "boolean" },
+        "flagged": { "type": "boolean", "description": "True if the odds ratio (or its inverse) exceeds prior_gap_flag, or the top candidate differs; an investor judgment item is then added." }
       }
     },
     "unchanged": {
@@ -122,8 +146,8 @@
         "properties": {
           "claim_id": { "type": "string" },
           "quantity": { "type": "string" },
-          "by": { "enum": ["estimator", "auditor", "self_check", "recovery"] },
-          "reason": { "type": "string" }
+          "by": { "enum": ["estimator", "auditor", "self_check", "recovery", "audit_code"] },
+          "reason": { "type": "string", "description": "Free text, or 'secondary_only' for changes supported only by secondary evidence (RFC-008 Rumor handling)." }
         },
         "anyOf": [{ "required": ["claim_id"] }, { "required": ["quantity"] }]
       }
@@ -139,7 +163,7 @@
           "why": { "type": "string", "description": "Why this is judgment rather than fact." },
           "related_quantities": { "type": "array", "items": { "type": "string" } },
           "considerations": { "type": "array", "items": { "type": "string" } },
-          "source": { "enum": ["estimator", "template_prompt", "market_gap"] }
+          "source": { "enum": ["estimator", "template_prompt", "prior_gap", "rumor_credibility"] }
         }
       }
     },
@@ -173,7 +197,7 @@
             "required": ["name", "by", "passed"],
             "additionalProperties": false,
             "properties": {
-              "name": { "enum": ["evidence_in_set", "as_of_le_clock", "stated_dates", "quote_exists", "quote_supports", "provenance_label", "primary_citation_per_change"] },
+              "name": { "enum": ["evidence_in_set", "as_of_le_clock", "stated_dates", "quote_exists", "quote_supports", "provenance_label", "primary_citation_per_change", "secondary_only"] },
               "by": { "enum": ["code", "auditor"] },
               "passed": { "type": "boolean" },
               "failures": { "type": "array", "items": { "type": "string" }, "description": "Claim IDs or quantities that failed." }
@@ -219,7 +243,7 @@
             "additionalProperties": false,
             "properties": {
               "evidence_id": { "$ref": "thesis-version.schema.json#/$defs/EvidenceId" },
-              "locator": { "type": "string", "description": "Section, page, or char span, e.g. 'EX-2.1 §7.1(b)' or 'chars:10230-10412'." },
+              "locator": { "type": "string", "description": "Section, page, or char span, e.g. 'S-1 Principal Stockholders' or 'chars:10230-10412'." },
               "quote": { "type": "string" }
             }
           }
@@ -242,7 +266,7 @@
           "additionalProperties": false,
           "properties": {
             "flagged": { "type": "boolean" },
-            "by": { "enum": ["estimator", "auditor", "self_check", "recovery"] },
+            "by": { "enum": ["estimator", "auditor", "self_check", "recovery", "audit_code"] },
             "reason": { "type": "string" }
           }
         }

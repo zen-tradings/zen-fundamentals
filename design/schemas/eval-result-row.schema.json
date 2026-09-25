@@ -4,18 +4,23 @@
   "title": "EvalResultRow",
   "description": "One row of the RFC-007 results table: one (config, variant, subset) within a replay run. Metrics that don't apply to the row are null. Metric definitions are in RFC-007 §4 and §6.",
   "type": "object",
-  "required": ["run_id", "config", "variant", "subset", "valid", "template_version", "n_deals", "n_checkpoints", "repeats", "pit_violations", "metrics"],
+  "required": ["run_id", "config", "variant", "subset", "valid", "template_version", "n_targets", "n_cases", "n_events", "n_checkpoints", "repeats", "pit_violations", "metrics"],
   "additionalProperties": false,
   "properties": {
     "run_id": { "type": "string" },
     "config": {
-      "enum": ["B0", "B1", "B1-leak", "F", "A1", "A2", "G"],
-      "description": "B0 base rate; B1 market-implied (PIT unaffected date); B1-leak diagnostic; F full; A1 low-cost planner/estimator; A2 no auditor; G gate-off scoring of F."
+      "enum": ["B0", "B1", "B1-oracle", "F", "A1", "A2", "A3", "G"],
+      "description": "B0 base rate; B1 reference prior on extractions; B1-oracle reference prior on labels (diagnostic); F full; A1 low-cost planner/estimator; A2 no auditor; A3 primary sources only; G gate-off scoring of F."
     },
     "variant": { "enum": ["clean", "noise", "injected_errors", "faults"] },
     "subset": {
       "enum": ["H-named", "H-anon", "pre-cutoff-named"],
       "description": "Headline rows are H-named and H-anon only; pre-cutoff-named is a contamination diagnostic."
+    },
+    "provider_candidate_split": {
+      "enum": ["all", "provider_is_candidate", "provider_not_candidate"],
+      "default": "all",
+      "description": "RFC-007 §4 provider-candidate split; 'all' for the main row."
     },
     "valid": {
       "type": "boolean",
@@ -25,9 +30,19 @@
     "effective_cutoff": {
       "type": ["string", "null"],
       "format": "date",
-      "description": "max(stated training cutoff) across all models in the config; null for B0/B1."
+      "description": "max(stated training cutoff) across all models in the config; null for B0."
     },
-    "n_deals": { "type": "integer", "minimum": 0 },
+    "n_targets": { "type": "integer", "minimum": 0, "description": "Distinct targets; the bootstrap resampling unit." },
+    "n_cases": { "type": "integer", "minimum": 0 },
+    "n_events": {
+      "type": "object",
+      "required": ["acquisitions", "stakes"],
+      "additionalProperties": false,
+      "properties": {
+        "acquisitions": { "type": "integer", "minimum": 0 },
+        "stakes": { "type": "integer", "minimum": 0, "description": "Primary-confirmed stake events only." }
+      }
+    },
     "n_checkpoints": { "type": "integer", "minimum": 0 },
     "repeats": { "type": "integer", "minimum": 1 },
     "pit_violations": { "type": "integer", "minimum": 0 },
@@ -35,55 +50,85 @@
       "type": "object",
       "additionalProperties": false,
       "properties": {
-        "brier_announcement": { "$ref": "#/$defs/Estimate" },
-        "brier_checkpoints": { "$ref": "#/$defs/Estimate" },
-        "brier_by_phase": {
+        "acquirer_log_loss_start": { "$ref": "#/$defs/Estimate" },
+        "acquirer_log_loss_checkpoints": { "$ref": "#/$defs/Estimate" },
+        "acquirer_multiclass_brier_start": { "$ref": "#/$defs/Estimate" },
+        "acquirer_multiclass_brier_checkpoints": { "$ref": "#/$defs/Estimate" },
+        "p_acquired_brier": { "$ref": "#/$defs/Estimate" },
+        "p_acquired_bss": { "$ref": "#/$defs/Estimate" },
+        "announcement_date_abs_error_days_start": { "$ref": "#/$defs/Summary" },
+        "announcement_date_abs_error_days_checkpoints": { "$ref": "#/$defs/Summary" },
+        "stake_brier": { "$ref": "#/$defs/Estimate" },
+        "stake_bss": { "$ref": "#/$defs/Estimate" },
+        "stake_log_loss": { "$ref": "#/$defs/Estimate" },
+        "rank": {
           "type": ["object", "null"],
+          "description": "Positive events only. Top-k hit rates at the initial checkpoint and the last checkpoints >= 90 and >= 30 days before the event.",
           "additionalProperties": false,
           "properties": {
-            "life_0_25": { "$ref": "#/$defs/Estimate" },
-            "life_25_50": { "$ref": "#/$defs/Estimate" },
-            "life_50_75": { "$ref": "#/$defs/Estimate" },
-            "life_75_100": { "$ref": "#/$defs/Estimate" },
-            "first_after_second_request": { "$ref": "#/$defs/Estimate" }
+            "top1_start": { "$ref": "#/$defs/Estimate" },
+            "top3_start": { "$ref": "#/$defs/Estimate" },
+            "top1_90d": { "$ref": "#/$defs/Estimate" },
+            "top3_90d": { "$ref": "#/$defs/Estimate" },
+            "top1_30d": { "$ref": "#/$defs/Estimate" },
+            "top3_30d": { "$ref": "#/$defs/Estimate" },
+            "mean_rank_90d": { "$ref": "#/$defs/Estimate" }
           }
         },
-        "brier_skill_score": { "$ref": "#/$defs/Estimate" },
-        "brier_delta_vs_market": { "$ref": "#/$defs/Estimate", "description": "Paired: this config's Brier@checkpoints minus B1's, on the same deals and checkpoints." },
-        "scenario_brier_announcement": { "$ref": "#/$defs/Estimate" },
-        "scenario_brier_checkpoints": { "$ref": "#/$defs/Estimate" },
-        "scenario_price_rel_error": { "$ref": "#/$defs/Summary" },
-        "close_date_abs_error_days_announcement": { "$ref": "#/$defs/Summary" },
-        "close_date_abs_error_days_checkpoints": { "$ref": "#/$defs/Summary" },
-        "close_date_signed_bias_days": { "$ref": "#/$defs/Estimate" },
-        "condition_recall_announcement": { "$ref": "#/$defs/Estimate" },
-        "condition_recall_last": { "$ref": "#/$defs/Estimate" },
-        "condition_precision_last": { "$ref": "#/$defs/Estimate" },
-        "condition_status_accuracy_last": { "$ref": "#/$defs/Estimate" },
+        "lead_time_days": { "$ref": "#/$defs/Summary" },
+        "stake_by_structure": {
+          "type": ["object", "null"],
+          "description": "Positive stake events split by labeled structure (RFC-007 §4 By stake structure). Stake Brier is not split, since negatives have no structure.",
+          "propertyNames": { "enum": ["pure_equity", "commercial", "undetermined"] },
+          "additionalProperties": {
+            "type": "object",
+            "required": ["n_events"],
+            "additionalProperties": false,
+            "properties": {
+              "n_events": { "type": "integer", "minimum": 0 },
+              "top1_90d": { "$ref": "#/$defs/Estimate" },
+              "top3_90d": { "$ref": "#/$defs/Estimate" },
+              "lead_time_days": { "$ref": "#/$defs/Summary" }
+            }
+          }
+        },
+        "structure_tag_accuracy": { "$ref": "#/$defs/Estimate" },
+        "structure_tag_annotator_agreement": { "$ref": "#/$defs/Estimate" },
+        "false_alarm_rate": { "$ref": "#/$defs/Estimate" },
+        "delta_vs_prior_acquirer_log_loss": { "$ref": "#/$defs/Estimate", "description": "Paired: this config's acquirer log loss @checkpoints minus B1's, on the same cases and checkpoints." },
+        "delta_vs_prior_stake_brier": { "$ref": "#/$defs/Estimate" },
+        "relationship_recall_start": { "$ref": "#/$defs/Estimate" },
+        "relationship_recall_last": { "$ref": "#/$defs/Estimate" },
+        "relationship_precision_last": { "$ref": "#/$defs/Estimate" },
+        "secondary_only_change_rate": { "$ref": "#/$defs/Estimate" },
+        "rumor_hit_rate": { "$ref": "#/$defs/Estimate" },
         "citation_precision_judge": { "$ref": "#/$defs/Estimate" },
         "citation_precision_human": { "$ref": "#/$defs/Estimate" },
         "citation_human_sample_n": { "type": ["integer", "null"], "minimum": 0 },
         "judge_human_kappa": { "$ref": "#/$defs/Estimate" },
         "cost_per_version_usd": { "$ref": "#/$defs/Percentiles" },
         "cost_per_evaluation_usd": { "$ref": "#/$defs/Percentiles" },
+        "cost_per_heartbeat_usd": { "$ref": "#/$defs/Percentiles" },
         "latency_per_version_s": { "$ref": "#/$defs/Percentiles" },
-        "versions_per_deal": { "type": ["number", "null"], "minimum": 0 },
-        "versions_per_deal_month": { "type": ["number", "null"], "minimum": 0 },
-        "repeat_spread_brier_checkpoints_sd": { "type": ["number", "null"], "minimum": 0 }
+        "versions_per_case": { "type": ["number", "null"], "minimum": 0 },
+        "versions_per_case_month": { "type": ["number", "null"], "minimum": 0 },
+        "overrides_per_case": { "type": ["number", "null"], "minimum": 0 },
+        "repeat_spread_acquirer_log_loss_sd": { "type": ["number", "null"], "minimum": 0 }
       }
     },
     "calibration": {
       "type": "array",
-      "description": "Bins [0,.5) [.5,.7) [.7,.85) [.85,.95) [.95,1] over pooled checkpoints.",
+      "description": "Bins [0,.02) [.02,.05) [.05,.10) [.10,.25) [.25,.50) [.50,1] over pooled candidate probabilities at checkpoints. kind separates pooled, acquisition-only, and stake-only tables.",
       "items": {
         "type": "object",
-        "required": ["bin_low", "bin_high", "n_checkpoints", "n_deals", "mean_p", "observed_rate"],
+        "required": ["kind", "bin_low", "bin_high", "n_probabilities", "n_cases", "mean_p", "observed_rate"],
         "additionalProperties": false,
         "properties": {
+          "kind": { "enum": ["pooled", "acquisition", "stake"] },
           "bin_low": { "type": "number", "minimum": 0, "maximum": 1 },
           "bin_high": { "type": "number", "minimum": 0, "maximum": 1 },
-          "n_checkpoints": { "type": "integer", "minimum": 0 },
-          "n_deals": { "type": "integer", "minimum": 0 },
+          "n_probabilities": { "type": "integer", "minimum": 0 },
+          "n_cases": { "type": "integer", "minimum": 0 },
           "mean_p": { "type": ["number", "null"], "minimum": 0, "maximum": 1 },
           "observed_rate": { "type": ["number", "null"], "minimum": 0, "maximum": 1 }
         }
@@ -108,14 +153,16 @@
                 "properties": {
                   "n_distractors": { "type": "integer", "minimum": 0 },
                   "induced_change_rate": { "$ref": "#/$defs/Estimate" },
-                  "drift_close_probability_abs": { "$ref": "#/$defs/Estimate" },
-                  "drift_close_date_days": { "$ref": "#/$defs/Estimate" },
+                  "drift_p_acquired_logit": { "$ref": "#/$defs/Estimate" },
+                  "drift_named_candidate_logit": { "$ref": "#/$defs/Estimate" },
                   "citation_rate_support": { "$ref": "#/$defs/Estimate" },
+                  "citation_rate_support_unflagged": { "$ref": "#/$defs/Estimate", "description": "Cited in support of a change without the secondary_only flag. Must be 0." },
                   "citation_rate_uncertain_only": { "$ref": "#/$defs/Estimate" }
                 }
               }
             },
-            "noisy_minus_clean_brier": { "$ref": "#/$defs/Estimate" }
+            "noisy_minus_clean_acquirer_log_loss": { "$ref": "#/$defs/Estimate" },
+            "noisy_minus_clean_stake_brier": { "$ref": "#/$defs/Estimate" }
           }
         },
         "injected_errors": {
@@ -124,7 +171,7 @@
           "properties": {
             "by_class": {
               "type": "object",
-              "propertyNames": { "enum": ["scenario_sum", "derivation_mismatch", "term_arithmetic", "date_order", "missing_citation", "future_citation", "wrong_citation", "status_inconsistency"] },
+              "propertyNames": { "enum": ["distribution_sum", "derivation_mismatch", "stake_below_acquisition", "date_outside_horizon", "missing_citation", "future_citation", "wrong_citation", "relationship_inconsistency", "structure_unlinked", "unflagged_rumor"] },
               "additionalProperties": {
                 "type": "object",
                 "required": ["n_injected"],
@@ -183,7 +230,7 @@
   ],
   "$defs": {
     "Estimate": {
-      "description": "Point estimate with a 95% deal-level bootstrap CI (null when not applicable).",
+      "description": "Point estimate with a 95% target-clustered bootstrap CI (null when not applicable).",
       "oneOf": [
         { "type": "null" },
         {
@@ -203,11 +250,12 @@
         { "type": "null" },
         {
           "type": "object",
-          "required": ["median", "mean"],
+          "required": ["median", "mean", "n"],
           "additionalProperties": false,
           "properties": {
             "median": { "type": "number" },
             "mean": { "type": "number" },
+            "n": { "type": "integer", "minimum": 0, "description": "Number of events or cases summarized; CIs are omitted when n < 5." },
             "ci_low_median": { "type": "number" },
             "ci_high_median": { "type": "number" }
           }

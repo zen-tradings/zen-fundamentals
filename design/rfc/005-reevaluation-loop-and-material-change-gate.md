@@ -8,7 +8,7 @@ Depends on: RFC-001, RFC-002, RFC-003, RFC-004
 
 ## Problem
 
-The old monitor loop scored "novelty" and published once novelty crossed a threshold. That fits content, not beliefs. A new filing can be completely novel and still change nothing we track (a routine 425 re-posting investor slides). A short 8-K line ("the parties received a Second Request") can move two quantities a lot. The loop has to ask **what this evidence changes**, not how new it is.
+The old monitor loop scored "novelty" and published once novelty crossed a threshold. That fits content, not beliefs. A new filing can be completely novel and still change nothing we track (a candidate's 10-Q that mentions the target only in a list of suppliers). A short SC 13D line ("the reporting person may seek board representation") can move two quantities a lot. The loop has to ask **what this evidence changes**, not how new it is.
 
 ## Proposal
 
@@ -30,19 +30,24 @@ Every step from `impact` onward runs with a fixed `clock` (see *Point-in-time*).
 
 2. **Route (deterministic, no model).** Each thesis has a subscription derived from `sources`: entity IDs and form types. An evidence item is routed to every active, watching thesis whose subscription it matches.
 
-   > Trade-off: deterministic routing is cheap and auditable, but it will miss relevant evidence that doesn't name a subscribed entity (for example an FTC statement that names only the deal). Discovery requests (RFC-001) and secondary web search cover part of that gap.
+   Large candidate filings (a hyperscaler's 10-K) are routed only if they mention the target, by entity link.
 
-3. **Batch.** Items routed to a thesis within `policy.debounce_s` of the first unprocessed item are batched into one evaluation job. Resolution-class evidence (template-defined, for example 8-K Item 1.02 termination or Item 2.01 completion) skips the debounce.
+   > Trade-off: deterministic routing is cheap and auditable, but it will miss relevant evidence that doesn't name a subscribed entity (for example a regulator's market study of AI partnerships that names no company). Discovery requests (RFC-001) and secondary web search cover part of that gap.
 
-   > Trade-off: debouncing merges an S-4 and its same-day exhibits into one evaluation, which cuts cost and duplicate versions. The price is up to `debounce_s` of added latency.
+3. **Batch.** Items routed to a thesis within `policy.debounce_s` of the first unprocessed item are batched into one evaluation job. Resolution-class evidence (template-defined, for example an acquisition announcement or a candidate's SC 13D crossing the stake threshold) skips the debounce.
+
+   **Heartbeat.** A template can declare a heartbeat (RFC-008: every 30 days by default). If no evaluation has run for that long, the scheduler creates an evaluation job with `trigger: heartbeat` and no new evidence, so time-sensitive quantities are re-estimated as the horizon runs down.
+
+   > Trade-off: debouncing merges an S-1 and its same-day exhibits into one evaluation, which cuts cost and duplicate versions. The price is up to `debounce_s` of added latency.
 
 4. **Fix the clock.** The job's `clock` is set when the job is created and never changes afterward:
    - live: `clock = max(as_of of batch)`. That is always ≤ wall time at job creation, and the job still sees every earlier evidence item;
-   - replay (RFC-007): `clock` = the as_of of the replay event.
+   - heartbeat: `clock` = the scheduled heartbeat time;
+   - replay (RFC-007): `clock` = the as_of of the replay event, or the virtual heartbeat time.
 
    Evidence that arrives after job creation waits for the next job. Because of this, every live evaluation can later be re-run in replay with the same `clock` and `evidence_set`.
 
-5. **Impact mapping (planner role).** Input: the new evidence, the current head values, and the template's quantity definitions. Output: an `ImpactAssessment` that says, for **each** tracked quantity, `affected: bool` with a short rationale and pointers to evidence spans. Template rules are applied first and can only *add* affected quantities, never remove them. For example, `DEFM14A → {conditions, key_terms, expected_close_date}` and `8-K mentioning "second request" → {conditions, scenarios, expected_close_date}`. Template dependency edges then propagate: if `conditions` is affected, then `scenarios` and `expected_close_date` are too, and `scenarios` always implies the derived `close_probability` (RFC-008).
+5. **Impact mapping (planner role).** Input: the new evidence, the current head values, and the template's quantity definitions. Output: an `ImpactAssessment` that says, for **each** tracked quantity, `affected: bool` with a short rationale and pointers to evidence spans. Template rules are applied first and can only *add* affected quantities, never remove them. For example, `S-1 → {target_facts, signals, acquirer_distribution}` and `text mentioning "strategic alternatives" → {signals, acquirer_distribution, expected_announcement_date}`. Template dependency edges then propagate: if `relationships` is affected, then `acquirer_distribution` and `stake_probabilities` are too, and `acquirer_distribution` always implies the derived `p_acquired` (RFC-008).
 
    If nothing is affected, the job ends with an EvaluationRecord (`decision: no_impact`).
 
@@ -50,28 +55,29 @@ Every step from `impact` onward runs with a fixed `clock` (see *Point-in-time*).
 
 6. **Extract (extractor role).** For affected quantities, run the template's extraction targets over the new documents. Document-local extractions come from the shared cache when present (RFC-001).
 
-7. **Estimate (estimator role).** Re-estimate the affected quantities from the EvidenceMatrix, which is the ranked, deduplicated, quota-limited, point-in-time view of the thesis's evidence (`TaskContract → SearchPlan → EvidenceMatrix`), plus the extractions. The estimator also reconciles conflicting signals (for example a press release and an 8-K that disagree on the expected timing) and records how it resolved them. The estimator lane has **no fetch tools**; it sees only what the EvidenceMatrix gives it.
+7. **Estimate (estimator role).** Re-estimate the affected quantities from the EvidenceMatrix, which is the ranked, deduplicated, quota-limited, point-in-time view of the thesis's evidence (`TaskContract → SearchPlan → EvidenceMatrix`), plus the extractions. The estimator also reconciles conflicting signals (for example a news report of talks and a company denial) and records how it resolved them. The estimator lane has **no fetch tools**; it sees only what the EvidenceMatrix gives it.
 
-   `close_probability` is **derived** from the `scenarios` quantity, not estimated separately (RFC-008). The estimator re-estimates scenarios, and code computes `close_probability`.
+   `p_acquired` is **derived** from the `acquirer_distribution` quantity, not estimated separately (RFC-008). The estimator re-estimates the distribution, and code computes `p_acquired`. Resolved stake probabilities are fixed at 1 by code.
 
-   The estimator does **not** see market prices or the market-implied probability. Those are computed alongside the estimate and shown to the reviewer (RFC-006).
+   The estimator does **not** see the template's reference prior. It is computed alongside the estimate and shown to the reviewer (RFC-006).
 
-   > Trade-off: keeping the market signal away from the estimator keeps its view independent. That is what makes "agent vs. market" a meaningful comparison in RFC-007, and it stops the agent from simply echoing the spread. The cost is that the estimator ignores one of the most informative signals a practitioner has. An ablation where the estimator does see market data is planned.
+   > Trade-off: keeping the reference prior away from the estimator keeps its view independent. That is what makes "agent vs. prior" a meaningful comparison in RFC-007, and it stops the agent from anchoring on a crude heuristic. The cost is small, since the prior is built from the same extractions the estimator already sees.
 
 8. **Self-check (estimator role + code).** Before emitting a candidate, the estimator runs an explicit self-check, and the result is recorded in `ThesisVersion.self_check` or `EvaluationRecord.self_check`. The checks are:
 
    | Check | How |
    |---|---|
-   | Scenario probabilities sum to 1 (tolerance 1e-6); every probability is in [0, 1] | code |
-   | `close_probability` equals the value derived from scenarios | code |
-   | `expected_close_date ≥ clock`; `expected_close_date ≤` current outside date, or an extension is cited | code |
-   | Key terms reconcile: headline price is consistent with consideration (cash + exchange ratio × reference price, within the collar); the completed-scenario price matches the consideration value | code, with tolerances from the template |
+   | `acquirer_distribution` sums to 1 (tolerance 1e-6); every probability is in [0, 1]; every candidate appears exactly once | code |
+   | `p_acquired` equals the value derived from the distribution | code |
+   | Each candidate's stake probability ≥ its acquisition probability; resolved stakes are 1 | code |
+   | `expected_announcement_date` is in `[clock, horizon.end]` | code |
+   | Every equity and debt relationship and every resolved stake has a structure tag, and commercial tags link to the relationship that justifies them | code |
    | Every changed quantity has ≥ 1 claim with a citation | code |
    | Every cited `as_of ≤ clock` | code |
-   | Condition statuses agree with scenarios (for example a `failed` regulatory condition alongside a high `completed` probability) and the estimator's own narrative agrees with its numbers | estimator model, one self-review pass |
+   | Relationship statuses agree with the rationale behind each candidate's probability (for example a `terminated` contract still treated as active), and the estimator's own narrative agrees with its numbers | estimator model, one self-review pass |
 
    On failure the estimator gets **one** revision. After that:
-   - a failed numeric reconciliation (sums, derivation, term arithmetic) means the job **fails** (`self_check_failed`), because a version whose numbers don't add up is not reviewable;
+   - a failed numeric reconciliation (sums, derivation, stake ≥ acquisition, date bounds) means the job **fails** (`self_check_failed`), because a version whose numbers don't add up is not reviewable;
    - a missing citation means the quantity is flagged uncertain and the audit will block approval;
    - an `as_of` violation is a hard error, as always;
    - a model-judged inconsistency means the item is flagged uncertain and listed in the ReviewPacket.
@@ -87,15 +93,19 @@ Every step from `impact` onward runs with a fixed `clock` (see *Point-in-time*).
 
 ### Material-change rules
 
-Rules are per quantity type. The shipped defaults are in the `merger_arb` template (RFC-008). They are **starting points to be tuned against replay results, not validated values.**
+Rules are per quantity type. The shipped defaults are in the `neocloud_deal` template (RFC-008). They are **starting points to be tuned against replay results, not validated values.**
+
+Probability rules use log-odds with an absolute floor: a move is material if `|logit(new) − logit(head)| ≥ logit_abs` **and** `|new − head| ≥ prob_abs_min`. The floor stops a move from 0.001 to 0.003 from paging anyone.
 
 | Quantity type | Material if |
 |---|---|
-| `probability` | `|new − head| ≥ abs` (for a derived probability, this applies to the derived value) |
-| `scenario_set` | any outcome's probability moves by `≥ prob_abs`, or any outcome's target price moves by `≥ price_rel` (relative), or an outcome is added or removed |
+| `probability` | the log-odds rule holds (for a derived probability, this applies to the derived value) |
+| `candidate_distribution` | the log-odds rule holds for any key (including `other` and `none`), or the top-ranked key other than `none` changes (when `on_top_rank_change`) |
+| `probability_map` | the log-odds rule holds for any key, or a key becomes resolved |
 | `date` | `|new − head| ≥ days` |
-| `condition_list` | any condition added or removed, or any status change in `on:` (default: all status changes) |
-| `key_terms` | any field changes (default), or only the fields listed in `on:` |
+| `relationship_list` | any relationship added or removed, or any status or value change in `on:` |
+| `signal_list` | any signal added, or any status change in `on:` |
+| `target_facts` | any change to a field group listed in `on:` |
 | any | the trigger is resolution-class evidence |
 
 Gate outcomes:
@@ -108,11 +118,11 @@ Gate outcomes:
 | Material vs. head but within threshold of the pending candidate | EvaluationRecord `consistent_with_pending` |
 | Unchanged | EvaluationRecord `no_change` |
 
-> Trade-off: a single per-quantity threshold is easy to explain and review, but it ignores the context the quantity sits in. A 0.05 move from 0.50 is different from a 0.05 move from 0.97, where the implied spread can be very sensitive. Log-odds thresholds are an option (see open questions). We start simple so reviewers can predict when they'll be paged.
+> Trade-off: log-odds thresholds treat a move from 0.02 to 0.04 as seriously as one from 0.33 to 0.50, which is what matters when base rates are low. They are harder for a reviewer to predict than "5 points", so the packet always shows the rule that fired and both the absolute and log-odds deltas.
 
 ### EvaluationRecord
 
-This records the evidence and the no-change decision without notifying anyone. Fields: `thesis_id`, `spec_revision`, `clock`, `trigger`, `evidence_set`, `impact_assessment`, `proposed_values` (when estimation ran), `deltas_vs_head`, `decision` (`no_impact | no_change | below_threshold | consistent_with_pending | version_created`), `version_id` (when created), `market_implied`, `self_check`, `recoveries`, `routing`, `cost`, `latency`. Records are immutable and written in the same fenced transaction as any version.
+This records the evidence and the no-change decision without notifying anyone. Fields: `thesis_id`, `spec_revision`, `clock`, `trigger`, `evidence_set`, `impact_assessment`, `proposed_values` (when estimation ran), `deltas_vs_head`, `decision` (`no_impact | no_change | below_threshold | consistent_with_pending | version_created`), `version_id` (when created), `reference_prior`, `self_check`, `recoveries`, `routing`, `cost`, `latency`. Records are immutable and written in the same fenced transaction as any version.
 
 ### Failure recovery
 
@@ -143,7 +153,7 @@ Tool and extraction failures are retried or routed to an alternate path, and eve
 ### Lifecycle, fencing, idempotency
 
 - Evaluation jobs follow the RFC-002 lifecycle: `queued → running → (needs_input ⇄ running) → completed | failed | cancelled | superseded`. A spec revision supersedes queued and running jobs from older revisions.
-- `needs_input`: the planner can pause and ask the thesis owner a question when the subject is ambiguous (for example which share class, or which of two announced deals). The question is answered via `POST /v1/evaluations/:id/answer`.
+- `needs_input`: the planner can pause and ask the thesis owner a question when the subject is ambiguous (for example which of two similarly named companies is the target, or whether a subsidiary counts as the candidate). The question is answered via `POST /v1/evaluations/:id/answer`.
 - Leased execution with RFC-003 fencing. Commit is one transaction: version or EvaluationRecord, ReviewPacket, `head` pointer unchanged (only approval moves it), and the outbox intent (if any).
 - Idempotency key: `(thesis_id, spec_revision, clock, hash(evidence_set))`. A re-delivered batch or a reaped-and-reclaimed job cannot produce a second version for the same inputs.
 - Retries survive restarts and honor provider `Retry-After`. A terminal failure never rewrites a committed version.
@@ -162,6 +172,6 @@ It never skips the audit.
 
 ## Open questions
 
-- Log-odds vs. absolute thresholds for `close_probability`.
-- Should a periodic "heartbeat" re-estimation run with no new evidence? Time passing alone moves `expected_close_date` risk as the outside date gets closer.
-- Debounce and resolution latency: is skipping the debounce for resolution-class evidence enough, or do some mid-deal events (a second request, an injunction) need to skip it too?
+- The log-odds threshold's `logit_abs` and `prob_abs_min` interact. Should the floor scale with the base rate instead of being a constant?
+- Should a heartbeat also fire on a schedule relative to the horizon end (for example 30 days before), not only after 30 idle days?
+- Debounce and resolution latency: is skipping the debounce for resolution-class evidence enough, or do some events (a strategic-review announcement, credible reported talks) need to skip it too?

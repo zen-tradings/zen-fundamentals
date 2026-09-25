@@ -41,7 +41,7 @@
         "adapter": {
           "type": "string",
           "description": "Adapter that produced the item.",
-          "examples": ["edgar", "press_release", "web_search", "market_data", "replay_distractor"]
+          "examples": ["edgar", "press_release", "news", "web_search", "replay_distractor"]
         },
         "publisher": { "type": "string" },
         "url": { "type": "string", "format": "uri" },
@@ -53,18 +53,18 @@
         "filer_cik": { "type": "string", "pattern": "^[0-9]{10}$" },
         "reliability": {
           "enum": ["high", "normal", "low"],
-          "description": "Adapter-assigned reliability within a tier. False-rumor distractors are secondary + low."
+          "description": "Adapter-assigned reliability within a tier (for news, from the configured outlet list). False-rumor distractors are secondary + low."
         }
       }
     },
     "tier": {
       "enum": ["primary", "secondary"],
-      "description": "Trust tier. Primary: issuer or regulator documents (EDGAR, company press releases) and market prices. Secondary: web and news."
+      "description": "Trust tier. Primary: issuer or regulator documents (EDGAR, company press releases). Secondary: news and web."
     },
     "doc_type": {
       "type": "string",
       "description": "Form type or document class.",
-      "examples": ["8-K", "8-K/A", "S-4", "DEFM14A", "PREM14A", "425", "SC TO-T", "SC 14D9", "press_release", "web_article", "price_bar", "rate_observation"]
+      "examples": ["8-K", "10-K", "10-Q", "S-1", "S-1/A", "SC 13D", "SC 13G", "D", "DEF 14A", "press_release", "news_article", "web_article"]
     },
     "form_items": {
       "type": "array",
@@ -77,8 +77,8 @@
       "description": "Publication or filing timestamp (UTC). Never the retrieval time, unless as_of_basis is retrieved_at."
     },
     "as_of_basis": {
-      "enum": ["edgar_acceptance", "wire_timestamp", "dateline_date_eod", "publication_date", "retrieved_at", "session_close", "replay_injection"],
-      "description": "How as_of was determined. dateline_date_eod pins a date-only timestamp to 23:59:59 in the publisher's timezone. replay_injection marks distractors injected by the RFC-007 harness."
+      "enum": ["edgar_acceptance", "wire_timestamp", "dateline_date_eod", "publication_date", "archive_capture", "retrieved_at", "replay_injection"],
+      "description": "How as_of was determined. dateline_date_eod pins a date-only timestamp to 23:59:59 in the publisher's timezone. archive_capture means the first public web-archive capture was later than the stated publication time and was used instead (RFC-007 §1.4). replay_injection marks distractors injected by the RFC-007 harness."
     },
     "as_of_precision": { "enum": ["exact", "day"] },
     "retrieved_at": { "type": "string", "format": "date-time" },
@@ -114,42 +114,22 @@
         "normalizer": { "type": "string", "description": "Normalizer name and version, including alternates." }
       }
     },
-    "price": {
+    "archive": {
       "type": "object",
-      "description": "Present iff doc_type is price_bar.",
-      "required": ["ticker", "session_date", "close", "currency", "adjustment"],
+      "description": "News items: the stated publication time and the first public web-archive capture. In replay corpora as_of is the later of the two, and the stored text is the earliest captured version (RFC-007 §1.4).",
+      "required": ["stated_published_at", "first_capture_at"],
       "additionalProperties": false,
       "properties": {
-        "ticker": { "type": "string" },
-        "session_date": { "type": "string", "format": "date" },
-        "close": { "type": "number", "exclusiveMinimum": 0 },
-        "currency": { "type": "string", "pattern": "^[A-Z]{3}$" },
-        "adjustment": { "enum": ["none", "split", "split_and_dividend"] }
-      }
-    },
-    "observation": {
-      "type": "object",
-      "description": "Present iff doc_type is rate_observation (e.g. 3-month T-bill yield for the market-implied formula, RFC-008).",
-      "required": ["series", "date", "value", "unit"],
-      "additionalProperties": false,
-      "properties": {
-        "series": { "type": "string", "examples": ["DTB3"] },
-        "date": { "type": "string", "format": "date" },
-        "value": { "type": "number" },
-        "unit": { "enum": ["percent_annualized"] }
+        "stated_published_at": { "type": ["string", "null"], "format": "date-time" },
+        "first_capture_at": { "type": "string", "format": "date-time" },
+        "capture_url": { "type": "string", "format": "uri" }
       }
     }
   },
   "allOf": [
     {
-      "if": { "properties": { "doc_type": { "const": "price_bar" } }, "required": ["doc_type"] },
-      "then": { "required": ["price"], "properties": { "as_of_basis": { "const": "session_close" } } },
-      "else": { "not": { "required": ["price"] } }
-    },
-    {
-      "if": { "properties": { "doc_type": { "const": "rate_observation" } }, "required": ["doc_type"] },
-      "then": { "required": ["observation"] },
-      "else": { "not": { "required": ["observation"] } }
+      "if": { "properties": { "as_of_basis": { "const": "archive_capture" } }, "required": ["as_of_basis"] },
+      "then": { "required": ["archive"] }
     },
     {
       "if": { "properties": { "source": { "properties": { "adapter": { "const": "edgar" } } } } },

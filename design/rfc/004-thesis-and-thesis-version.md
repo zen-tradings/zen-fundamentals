@@ -18,7 +18,7 @@ A thesis is a long-lived, declarative spec for a view the agent maintains about 
 
 | Field | Meaning |
 |---|---|
-| `subject` | What the thesis is about. It is template-typed; for `merger_arb` it names the target, the acquirer(s), and the announcement. |
+| `subject` | What the thesis is about. It is template-typed; for `neocloud_deal` it names the target, the candidate acquirers and investors, and the horizon. |
 | `template` | `{id, version}` of the centrally maintained template it instantiates (RFC-008). |
 | `tracked_quantities` | The quantities the agent estimates. They default to the template's list, and a thesis can only disable optional quantities; it cannot add new ones. |
 | `sources` | Adapter configs (EDGAR, press releases, web search) with priority and tier. |
@@ -30,30 +30,34 @@ Every `PUT` to a thesis creates a new `spec_revision`, and the thesis records th
 
 Schema: [`thesis.schema.json`](../schemas/thesis.schema.json).
 
-Example (`merger_arb`):
+Example (`neocloud_deal`):
 
 ```yaml
-thesis: acme-buys-widgetco
-template: { id: merger_arb, version: "1.0.0" }
+thesis: who-buys-gridcompute
+template: { id: neocloud_deal, version: "1.0.0" }
 subject:
-  target:   { name: "WidgetCo Inc.", cik: "0000000001", ticker: WDGT }
-  acquirers:
-    - { name: "Acme Corp.", cik: "0000000002", ticker: ACME }
-  announcement: { as_of: "2026-03-02T12:05:00Z", accession: "0000000001-26-000010" }
+  target: { name: "GridCompute Inc.", listing: private, cik: "0000000001" }
+  candidates:
+    - { key: anthropic, name: "Anthropic PBC",   type: ai_lab }
+    - { key: openai,    name: "OpenAI",          type: ai_lab }
+    - { key: microsoft, name: "Microsoft Corp.", ticker: MSFT, type: hyperscaler }
+    - { key: nvidia,    name: "NVIDIA Corp.",    ticker: NVDA, type: chipmaker }
+  horizon: { start: "2026-10-01T00:00:00Z", end: "2027-09-30" }
 sources:
-  - type: edgar            # primary
-    ciks: ["0000000001", "0000000002"]
-    forms: ["8-K", "8-K/A", "S-4", "S-4/A", "DEFM14A", "PREM14A", "425", "SC TO-T", "SC 14D9"]
+  - type: edgar            # primary; candidate 10-K/10-Q routed only if they mention the target
+    ciks: ["0000000001"]
+    candidate_tickers: [MSFT, NVDA]
+    forms: ["8-K", "10-K", "10-Q", "S-1", "S-1/A", "SC 13D", "SC 13G", "D", "DEF 14A"]
   - type: press_release    # primary
-    issuers: ["0000000001", "0000000002"]
-  - type: web_search       # secondary
-    queries: ["WidgetCo Acme merger antitrust"]
-  - type: market_data      # daily closes, target + acquirer (market-implied baseline only)
-    tickers: [WDGT, ACME]
+    issuers: [gridcompute, anthropic, openai, microsoft, nvidia]
+  - type: news             # secondary; named outlets
+    outlets: [reuters, bloomberg, the-information]
+  - type: web_search       # secondary; live only
+    queries: ["GridCompute acquisition", "GridCompute investment"]
 policy:
   material_change:          # overrides template defaults (example values)
-    scenarios: { prob_abs: 0.05, price_rel: 0.05 }   # close_probability is derived from scenarios
-    expected_close_date: { days: 14 }
+    acquirer_distribution: { logit_abs: 0.7, prob_abs_min: 0.02 }   # p_acquired is derived from it
+    stake_probabilities:   { logit_abs: 0.7, prob_abs_min: 0.02 }
   budget_usd_per_evaluation: 1.00   # example value
   max_latency_s: 600               # example value
   debounce_s: 900
@@ -72,12 +76,12 @@ A ThesisVersion is an **immutable** snapshot of every tracked quantity at a give
 | `parent_version_id` | The approved head this version was diffed against (null for the initial version) |
 | `spec_revision`, `template` | The config and template version it ran under |
 | `clock` | Point-in-time bound. No evidence with `as_of > clock` influenced this version. |
-| `trigger` | `initial | evidence | manual | spec_revision | resolution`, plus the triggering evidence IDs |
+| `trigger` | `initial | evidence | heartbeat | manual | spec_revision | resolution`, plus the triggering evidence IDs (empty for `heartbeat`) |
 | `evidence_set` | Every evidence ID visible to and used by the estimator, with a hash of the sorted set |
 | `values` | The new value of every tracked quantity, typed by the template |
 | `deltas` | Per-quantity change against the parent: `changed`, the typed delta, and whether it is `material` and which rule fired |
 | `carried_forward` | Quantities not re-estimated in this evaluation, copied from the parent |
-| `market_implied` | Market-implied completion probability at `clock`, with its inputs (RFC-008 §Market-implied probability). Shown next to the agent's estimate. It is **not** a tracked quantity, never triggers the gate, and is not an input to the estimator. |
+| `reference_prior` | The template's rule-based reference prior at `clock`, with its inputs (RFC-008 §Reference prior). Shown next to the agent's estimate. It is **not** a tracked quantity, never triggers the gate, and is not an input to the estimator. |
 | `self_check` | Result of the estimator's pre-emit self-check (RFC-005 step 8) |
 | `recoveries` | Tool or extraction failures in this evaluation and how each was handled: retry, alternate path, or degraded (RFC-005) |
 | `review_packet_id` | Link to the ReviewPacket (RFC-006) |
@@ -100,8 +104,8 @@ Schema: [`thesis-version.schema.json`](../schemas/thesis-version.schema.json).
 A version is created only when the material-change gate says yes (RFC-005), and also:
 
 - on the initial evaluation after a thesis is created (`trigger: initial`);
-- on resolution evidence (`trigger: resolution`, always material);
-- on a manual `run` or a spec revision when some quantity changes materially.
+- on resolution evidence (`trigger: resolution`, always material), including partial resolutions such as a candidate's stake event (RFC-008);
+- on a manual `run`, a spec revision, or a template heartbeat when some quantity changes materially.
 
 Non-material evaluations produce an **EvaluationRecord**, not a version (RFC-005). EvaluationRecords are immutable too, but nobody is notified about them and they never become the head.
 
@@ -120,11 +124,11 @@ needs_review┼──────────────► rejected   (head un
 - `approved` requires the audit to have passed, or an explicit override reason (RFC-006).
 - In replay evaluation only, `review: auto` approves each version at commit so the timeline can be scored without humans (RFC-007). Live theses reject `review: auto`.
 
-> Trade-off: superseding means a reviewer never signs off on intermediate candidates, so some intermediate reasoning gets less human scrutiny. We accept that because the alternative, a review queue that grows with filing frequency, would make human review a bottleneck exactly when deals are busiest.
+> Trade-off: superseding means a reviewer never signs off on intermediate candidates, so some intermediate reasoning gets less human scrutiny. We accept that because the alternative, a review queue that grows with filing frequency, would make human review a bottleneck exactly when a target is busiest (a financing, an IPO filing, and a wave of reported talks in the same week).
 
 ### Thesis status
 
-`active` (being monitored or runnable) → `resolved` (resolution evidence approved; no further evaluations; outcome_audit feedback created) → `archived`. `paused` stops the watch loop but keeps `run` available.
+`active` (being monitored or runnable) → `resolved` (final resolution evidence approved, or the template horizon ended; no further evaluations; outcome_audit feedback created) → `archived`. A partial resolution (a candidate's stake event) leaves the thesis `active`. `paused` stops the watch loop but keeps `run` available.
 
 ## Feedback
 
@@ -133,7 +137,7 @@ Feedback is structured, typed, and append-only. There are three kinds:
 | Kind | Attached to | Payload | Who |
 |---|---|---|---|
 | `user_rating` | version (optionally one quantity or claim) | `rating` (−2..+2), `dimension` (`accuracy | usefulness | citation_quality | packet_clarity`), optional `comment` | reviewer or thesis owner |
-| `outcome_audit` | thesis | `resolution`, `resolution_date`, `scenario_outcome`, `final_conditions`, `realized_price`, plus computed per-version scores using the **RFC-007 §4 metric definitions** and an `eval_case_ref` when the deal is promoted into the replay dataset | created automatically on `resolved` from the resolution evidence, then confirmed by a human |
+| `outcome_audit` | thesis | `acquisition_outcome`, `stake_outcomes`, `resolution_date`, `relationships_timeline`, plus computed per-version scores using the **RFC-007 §4 metric definitions** and an `eval_case_ref` when the thesis is promoted into the replay dataset | created automatically on `resolved` from the resolution evidence (or the horizon end), then confirmed by a human |
 | `tool_execution_quality` | evaluation (optionally one call) | `tool_or_route`, `error_class`, `outcome` (`ok | wrong_result | malformed | timeout | recovered | failed`), `details` | emitted automatically from `RecoveryEvent`s (RFC-005); humans can add `wrong_result` reports |
 
 Resolved live theses are post-cutoff for every model already deployed, which makes them the best future source of uncontaminated replay cases. `outcome_audit` records the fields RFC-007 §1.3 needs, so promoting a thesis into the dataset is a copy, not a re-annotation (it still gets second-annotator review).
@@ -153,5 +157,5 @@ The version, its ReviewPacket, and any outbox intent are written in a single tra
 
 ## Open questions
 
-- Should a thesis be allowed to change templates (for example when a deal is restructured into a tender offer), or should that close the thesis and start a new one linked to it?
-- Multiple competing bidders: one thesis per bidder, or one thesis whose subject has several acquirers?
+- When an acquisition is announced, should the resolved thesis link to a follow-on thesis that tracks whether the deal closes, or is that out of scope?
+- Should adding a candidate mid-horizon be allowed as a spec revision, given that the new candidate's probabilities have no history to diff against and RFC-007 scores only fixed candidate lists?

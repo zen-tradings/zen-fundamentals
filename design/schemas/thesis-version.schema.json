@@ -38,8 +38,8 @@
       "required": ["kind", "evidence_ids"],
       "additionalProperties": false,
       "properties": {
-        "kind": { "enum": ["initial", "evidence", "manual", "spec_revision", "resolution"] },
-        "evidence_ids": { "type": "array", "items": { "$ref": "#/$defs/EvidenceId" } }
+        "kind": { "enum": ["initial", "evidence", "heartbeat", "manual", "spec_revision", "resolution"] },
+        "evidence_ids": { "type": "array", "items": { "$ref": "#/$defs/EvidenceId" }, "description": "Empty for heartbeat." }
       }
     },
     "evidence_set": {
@@ -53,7 +53,7 @@
       }
     },
     "values": {
-      "$ref": "#/$defs/MergerArbValues"
+      "$ref": "#/$defs/NeocloudDealValues"
     },
     "deltas": {
       "type": "array",
@@ -65,7 +65,7 @@
       "uniqueItems": true,
       "description": "Quantities not re-estimated in this evaluation; values copied from the parent."
     },
-    "market_implied": { "$ref": "#/$defs/MarketImplied" },
+    "reference_prior": { "$ref": "#/$defs/ReferencePrior" },
     "self_check": { "$ref": "#/$defs/SelfCheck" },
     "recoveries": {
       "type": "array",
@@ -83,6 +83,12 @@
         "auditor": {
           "anyOf": [{ "$ref": "#/$defs/ModelRef" }, { "type": "null" }],
           "description": "Null only in the no-auditor ablation (RFC-007 A2)."
+        },
+        "provider_is_candidate": {
+          "type": "array",
+          "items": { "enum": ["planner", "estimator", "extractor", "auditor"] },
+          "uniqueItems": true,
+          "description": "Roles whose provider is also a named candidate in the thesis (RFC-008 Conflict of interest). Flag only; never blocks the route."
         }
       }
     },
@@ -129,27 +135,33 @@
         "currency": { "type": "string", "pattern": "^[A-Z]{3}$" }
       }
     },
-    "Scenario": {
+    "CandidateKey": { "$ref": "thesis.schema.json#/$defs/CandidateKey" },
+    "OutcomeKey": {
+      "description": "A candidate key, or one of the reserved keys other and none.",
+      "anyOf": [
+        { "$ref": "#/$defs/CandidateKey" },
+        { "enum": ["other", "none"] }
+      ]
+    },
+    "DistributionEntry": {
       "type": "object",
-      "required": ["outcome", "probability", "target_price_per_share"],
+      "required": ["key", "probability"],
       "additionalProperties": false,
       "properties": {
-        "outcome": { "enum": ["completed_as_announced", "renegotiated", "terminated"] },
+        "key": { "$ref": "#/$defs/OutcomeKey" },
         "probability": { "$ref": "#/$defs/Probability" },
-        "target_price_per_share": { "$ref": "#/$defs/Money" },
-        "price_rationale": { "type": "string" }
+        "rationale": { "type": "string" }
       }
     },
-    "ScenarioSet": {
+    "CandidateDistribution": {
       "type": "array",
-      "description": "Exactly one entry per outcome. Probabilities must sum to 1 within 1e-6. That rule can't be expressed in JSON Schema, so it is enforced by the self-check (RFC-005).",
+      "description": "Exactly one entry per candidate key, plus other and none. Probabilities must sum to 1 within 1e-6, and every candidate must appear exactly once. Those rules can't be expressed in JSON Schema, so they are enforced by the self-check (RFC-005).",
       "minItems": 3,
-      "maxItems": 3,
-      "items": { "$ref": "#/$defs/Scenario" },
+      "maxItems": 14,
+      "items": { "$ref": "#/$defs/DistributionEntry" },
       "allOf": [
-        { "contains": { "properties": { "outcome": { "const": "completed_as_announced" } } } },
-        { "contains": { "properties": { "outcome": { "const": "renegotiated" } } } },
-        { "contains": { "properties": { "outcome": { "const": "terminated" } } } }
+        { "contains": { "properties": { "key": { "const": "other" } } } },
+        { "contains": { "properties": { "key": { "const": "none" } } } }
       ]
     },
     "DerivedProbability": {
@@ -158,9 +170,36 @@
       "additionalProperties": false,
       "properties": {
         "value": { "$ref": "#/$defs/Probability" },
-        "derived_from": { "const": "scenarios" },
-        "formula": { "const": "P(completed_as_announced) + P(renegotiated)" }
+        "derived_from": { "const": "acquirer_distribution" },
+        "formula": { "const": "1 - P(none)" }
       }
+    },
+    "StakeEntry": {
+      "type": "object",
+      "required": ["key", "probability", "resolved"],
+      "additionalProperties": false,
+      "properties": {
+        "key": { "$ref": "#/$defs/CandidateKey" },
+        "probability": { "$ref": "#/$defs/Probability" },
+        "resolved": { "type": "boolean", "description": "True once the candidate's stake event has happened; probability is then 1 and computed by code." },
+        "resolved_by": { "type": "array", "items": { "$ref": "#/$defs/EvidenceId" } },
+        "structure": { "$ref": "#/$defs/StakeStructure" },
+        "structure_flags": { "type": "array", "items": { "$ref": "#/$defs/StakeStructure" }, "uniqueItems": true },
+        "rationale": { "type": "string" }
+      },
+      "allOf": [
+        {
+          "if": { "properties": { "resolved": { "const": true } } },
+          "then": { "required": ["resolved_by", "structure"], "properties": { "probability": { "const": 1 } } }
+        }
+      ]
+    },
+    "ProbabilityMap": {
+      "type": "array",
+      "description": "One entry per candidate key. Independent probabilities; they do not sum to 1. Each must be >= that candidate's acquirer_distribution probability (self-check).",
+      "minItems": 1,
+      "maxItems": 12,
+      "items": { "$ref": "#/$defs/StakeEntry" }
     },
     "DateEstimate": {
       "type": "object",
@@ -177,105 +216,140 @@
             "high": { "type": "string", "format": "date" }
           }
         },
-        "conditional_on": { "const": "completion" }
+        "conditional_on": { "const": "acquisition_in_horizon" }
       }
     },
-    "Condition": {
+    "Relationship": {
       "type": "object",
-      "required": ["key", "type", "description", "status"],
+      "required": ["key", "candidate", "type", "role", "status", "first_disclosed_as_of"],
       "additionalProperties": false,
       "properties": {
         "key": {
           "type": "string",
-          "pattern": "^(regulatory|vote|tender|financing|other):[a-z0-9_:-]+$",
-          "description": "Canonical key from the RFC-008 vocabulary, e.g. regulatory:hsr, vote:target_shareholders."
+          "pattern": "^(compute_contract|gpu_supply|equity|debt|capacity_backstop|board|partnership|other:[a-z0-9_-]+):[a-z][a-z0-9_]{1,31}(:[a-z0-9_-]+)?$",
+          "description": "Canonical key <type>:<candidate>[:<slug>] from the RFC-008 vocabulary, e.g. compute_contract:microsoft, equity:nvidia."
         },
-        "type": { "enum": ["regulatory", "shareholder_vote", "financing", "other"] },
-        "description": { "type": "string" },
-        "status": { "enum": ["pending", "satisfied", "waived", "failed", "not_applicable"] },
-        "expected_by": { "type": "string", "format": "date" }
-      }
+        "candidate": { "$ref": "#/$defs/CandidateKey" },
+        "type": { "enum": ["compute_contract", "gpu_supply", "equity", "debt", "capacity_backstop", "board", "partnership", "other"] },
+        "role": { "enum": ["customer", "supplier", "investor", "lender", "partner", "other"] },
+        "status": { "enum": ["announced", "active", "expired", "terminated"] },
+        "value": { "$ref": "#/$defs/Money" },
+        "term_years": { "type": "number", "exclusiveMinimum": 0 },
+        "ownership_pct": { "type": "number", "minimum": 0, "maximum": 1 },
+        "structure": { "$ref": "#/$defs/StakeStructure" },
+        "structure_flags": { "type": "array", "items": { "$ref": "#/$defs/StakeStructure" }, "uniqueItems": true },
+        "linked_relationships": {
+          "type": "array",
+          "items": { "type": "string" },
+          "uniqueItems": true,
+          "description": "Relationship keys that justify a commercial structure tag (supply, backstop, or compute contract). Required non-empty for vendor_financing, capacity_backstop, customer_equity_kicker (self-check)."
+        },
+        "first_disclosed_as_of": { "type": "string", "format": "date-time" }
+      },
+      "allOf": [
+        {
+          "if": { "properties": { "type": { "enum": ["equity", "debt"] } } },
+          "then": { "required": ["structure"] }
+        }
+      ]
     },
-    "KeyTerms": {
+    "StakeStructure": {
+      "enum": ["vendor_financing", "capacity_backstop", "customer_equity_kicker", "pure_equity", "arms_length", "undetermined"],
+      "description": "RFC-008 structure tag. Describes the commercial context of equity or debt; never decides whether a stake event happened. arms_length is the debt counterpart of pure_equity."
+    },
+    "Signal": {
       "type": "object",
-      "required": ["consideration", "price_per_share", "break_fee", "outside_date"],
+      "required": ["key", "description", "status", "direction", "basis"],
       "additionalProperties": false,
       "properties": {
-        "consideration": {
+        "key": {
+          "type": "string",
+          "pattern": "^(strategic_review|talks|talks_denied|concentration|financing|ipo|candidate|control|regulatory|leadership|other)(:[a-z0-9_-]+)*$",
+          "description": "Canonical key from the RFC-008 vocabulary, e.g. strategic_review, talks:openai, ipo:filed."
+        },
+        "description": { "type": "string" },
+        "status": { "enum": ["present", "resolved", "contradicted"] },
+        "direction": { "enum": ["raises", "lowers", "ambiguous"] },
+        "candidates": { "type": "array", "items": { "$ref": "#/$defs/CandidateKey" }, "uniqueItems": true },
+        "basis": { "enum": ["primary", "secondary_only"] }
+      }
+    },
+    "TargetFacts": {
+      "type": "object",
+      "required": ["listing"],
+      "additionalProperties": false,
+      "properties": {
+        "listing": {
           "type": "object",
-          "required": ["type"],
+          "required": ["status"],
           "additionalProperties": false,
           "properties": {
-            "type": { "enum": ["cash", "stock", "mixed", "election"] },
-            "cash_per_share": { "$ref": "#/$defs/Money" },
-            "exchange_ratio": { "type": "number", "exclusiveMinimum": 0 },
-            "collar": {
-              "type": "object",
-              "additionalProperties": false,
-              "properties": {
-                "kind": { "enum": ["fixed_value", "fixed_ratio", "other"] },
-                "lower_price": { "type": "number" },
-                "upper_price": { "type": "number" },
-                "description": { "type": "string" }
-              }
-            },
-            "cvr": {
-              "type": "object",
-              "additionalProperties": false,
-              "properties": {
-                "description": { "type": "string" },
-                "max_value_per_share": { "$ref": "#/$defs/Money" }
-              }
-            },
-            "election_proration": { "type": "string" }
+            "status": { "enum": ["private", "ipo_filed", "public"] },
+            "exchange": { "type": "string" },
+            "ticker": { "type": "string" }
           }
         },
-        "price_per_share": {
-          "allOf": [{ "$ref": "#/$defs/Money" }],
-          "description": "Headline per-share value as announced."
-        },
-        "break_fee": {
+        "control": {
           "type": "object",
           "additionalProperties": false,
           "properties": {
-            "target_termination_fee": { "$ref": "#/$defs/Money" },
-            "reverse_termination_fee": { "$ref": "#/$defs/Money" }
-          }
-        },
-        "outside_date": {
-          "type": "object",
-          "required": ["initial", "current"],
-          "additionalProperties": false,
-          "properties": {
-            "initial": { "type": "string", "format": "date" },
-            "extensions": {
+            "voting_control_holder": { "type": "string" },
+            "dual_class": { "type": "boolean" },
+            "change_of_control_provisions": {
               "type": "array",
               "items": {
                 "type": "object",
-                "required": ["to"],
+                "required": ["instrument", "description"],
                 "additionalProperties": false,
                 "properties": {
-                  "to": { "type": "string", "format": "date" },
-                  "trigger": { "type": "string", "description": "e.g. automatic if regulatory approvals pending" },
-                  "exercised": { "type": "boolean" }
+                  "instrument": { "type": "string", "description": "e.g. credit facility, customer contract" },
+                  "description": { "type": "string" }
                 }
               }
-            },
-            "current": { "type": "string", "format": "date" }
+            }
+          }
+        },
+        "capital": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "last_valuation": { "$ref": "#/$defs/Money" },
+            "last_valuation_as_of": { "type": "string", "format": "date" },
+            "total_debt": { "$ref": "#/$defs/Money" },
+            "contracted_backlog": { "$ref": "#/$defs/Money" }
+          }
+        },
+        "capacity": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "power_mw": { "type": "number", "minimum": 0 },
+            "accelerators": { "type": "integer", "minimum": 0 }
+          }
+        },
+        "customer_concentration": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "top_customer": { "type": "string", "description": "Candidate key when the top customer is a candidate; otherwise a name or 'undisclosed'." },
+            "top_customer_share": { "type": "number", "minimum": 0, "maximum": 1 },
+            "basis": { "enum": ["revenue", "backlog"] }
           }
         }
       }
     },
-    "MergerArbValues": {
+    "NeocloudDealValues": {
       "type": "object",
-      "required": ["scenarios", "close_probability", "expected_close_date", "conditions", "key_terms"],
+      "required": ["acquirer_distribution", "p_acquired", "stake_probabilities", "expected_announcement_date", "relationships", "signals", "target_facts"],
       "additionalProperties": false,
       "properties": {
-        "scenarios": { "$ref": "#/$defs/ScenarioSet" },
-        "close_probability": { "$ref": "#/$defs/DerivedProbability" },
-        "expected_close_date": { "$ref": "#/$defs/DateEstimate" },
-        "conditions": { "type": "array", "items": { "$ref": "#/$defs/Condition" } },
-        "key_terms": { "$ref": "#/$defs/KeyTerms" }
+        "acquirer_distribution": { "$ref": "#/$defs/CandidateDistribution" },
+        "p_acquired": { "$ref": "#/$defs/DerivedProbability" },
+        "stake_probabilities": { "$ref": "#/$defs/ProbabilityMap" },
+        "expected_announcement_date": { "$ref": "#/$defs/DateEstimate" },
+        "relationships": { "type": "array", "items": { "$ref": "#/$defs/Relationship" } },
+        "signals": { "type": "array", "items": { "$ref": "#/$defs/Signal" } },
+        "target_facts": { "$ref": "#/$defs/TargetFacts" }
       }
     },
     "Delta": {
@@ -283,42 +357,62 @@
       "required": ["quantity", "changed", "material"],
       "additionalProperties": false,
       "properties": {
-        "quantity": { "enum": ["scenarios", "close_probability", "expected_close_date", "conditions", "key_terms"] },
+        "quantity": { "enum": ["acquirer_distribution", "p_acquired", "stake_probabilities", "expected_announcement_date", "relationships", "signals", "target_facts"] },
         "changed": { "type": "boolean" },
         "material": { "type": "boolean" },
-        "rule": { "type": "string", "description": "Rule that fired, e.g. 'scenarios.prob_abs>=0.05 (terminated)'." },
+        "rule": { "type": "string", "description": "Rule that fired, e.g. 'acquirer_distribution.logit_abs>=0.7 (openai)' or 'acquirer_distribution.top_rank_change'." },
         "detail": {
           "type": "object",
-          "description": "Typed delta. probability: {abs}; date: {days}; conditions: {added[], removed[], status_changed[{key, from, to}]}; key_terms: {fields[]}; scenarios: {per_outcome[{outcome, prob_abs, price_rel}]}."
+          "description": "Typed delta. probability: {abs, logit}; candidate_distribution: {per_key[{key, abs, logit}], top_rank{from, to}}; probability_map: {per_key[{key, abs, logit}], resolved[]}; date: {days}; relationships: {added[], removed[], status_changed[{key, from, to}], value_changed[], structure_changed[{key, from, to}]}; signals: {added[], status_changed[{key, from, to}]}; target_facts: {groups[]}."
         }
       }
     },
-    "MarketImplied": {
+    "ReferencePrior": {
       "type": "object",
-      "description": "RFC-008 market-implied probability. Reference only: not a tracked quantity, not an estimator input, never gates.",
-      "required": ["formula_version", "probability", "flags", "inputs"],
+      "description": "RFC-008 reference prior. Reference only: not a tracked quantity, not an estimator input, never gates. Computed from shared extractions, never from the estimator's relationships quantity.",
+      "required": ["formula_version", "weights_version", "acquirer", "p_acquired", "stakes", "inputs"],
       "additionalProperties": false,
       "properties": {
-        "formula_version": { "const": "mi-1" },
-        "probability": { "anyOf": [{ "$ref": "#/$defs/Probability" }, { "type": "null" }] },
-        "null_reason": { "enum": ["degenerate_spread", "missing_prices", "missing_rate"] },
-        "flags": { "type": "array", "items": { "enum": ["trading_through", "clipped_low", "rate_defaulted_zero", "cvr_ignored"] } },
+        "formula_version": { "const": "rp-1" },
+        "weights_version": { "type": "string", "description": "Template minor version the weight table was fit for." },
+        "acquirer": { "type": "array", "items": { "$ref": "#/$defs/DistributionEntry" } },
+        "p_acquired": { "$ref": "#/$defs/Probability" },
+        "stakes": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["key", "probability"],
+            "additionalProperties": false,
+            "properties": {
+              "key": { "$ref": "#/$defs/CandidateKey" },
+              "probability": { "$ref": "#/$defs/Probability" }
+            }
+          }
+        },
         "inputs": {
           "type": "object",
           "additionalProperties": false,
           "properties": {
-            "price_session_date": { "type": "string", "format": "date" },
-            "S_t": { "type": "number" },
-            "A_t": { "type": "number" },
-            "V_t": { "type": "number" },
-            "D_t": { "type": "number" },
-            "S_u": { "type": "number" },
-            "M_u": { "type": "number" },
-            "M_t": { "type": "number" },
-            "r_t": { "type": "number" },
-            "tau_years": { "type": "number", "minimum": 0 },
-            "unaffected_date": { "type": "string", "format": "date" },
-            "evidence_ids": { "type": "array", "items": { "$ref": "#/$defs/EvidenceId" } }
+            "years_remaining": { "type": "number", "minimum": 0 },
+            "b_listing": { "$ref": "#/$defs/Probability" },
+            "strategic_review_applied": { "type": "boolean" },
+            "w_other": { "type": "number", "minimum": 0 },
+            "per_candidate": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "required": ["key", "w", "m"],
+                "additionalProperties": false,
+                "properties": {
+                  "key": { "$ref": "#/$defs/CandidateKey" },
+                  "w": { "type": "number", "minimum": 0 },
+                  "m": { "type": "number", "minimum": 0 },
+                  "b_stake": { "$ref": "#/$defs/Probability" },
+                  "relationship_keys": { "type": "array", "items": { "type": "string" } }
+                }
+              }
+            },
+            "extraction_evidence_ids": { "type": "array", "items": { "$ref": "#/$defs/EvidenceId" } }
           }
         }
       }
@@ -338,7 +432,7 @@
             "additionalProperties": false,
             "properties": {
               "name": {
-                "enum": ["scenario_sum", "derivation", "date_order", "term_arithmetic", "completed_price_vs_consideration", "citation_coverage", "as_of_le_clock", "narrative_consistency"]
+                "enum": ["distribution_sum", "candidate_coverage", "derivation", "stake_ge_acquisition", "resolved_stakes", "date_in_horizon", "structure_links", "citation_coverage", "as_of_le_clock", "narrative_consistency"]
               },
               "method": { "enum": ["code", "model"] },
               "passed": { "type": "boolean" },
