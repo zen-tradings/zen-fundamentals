@@ -133,7 +133,7 @@ All of these are resolution-class evidence: always material, and they skip the d
 | `signals` | `signal_list` | yes | Canonical deal-relevant signals. Each item: `{key, description, status, direction, candidates[], basis}`. |
 | `target_facts` | `target_facts` | yes | `listing {status, exchange?, ticker?}`, `control {voting_control_holder?, dual_class, change_of_control_provisions[]}`, `capital {last_valuation?, total_debt?, contracted_backlog?}`, `capacity {power_mw?, accelerators?}`, `customer_concentration {top_customer?, top_customer_share?}` |
 
-JSON shapes are in [`thesis-version.schema.json`](../schemas/thesis-version.schema.json) `$defs`.
+JSON shapes are in [`templates/neocloud_deal/values.schema.json`](../templates/neocloud_deal/values.schema.json), built from the core quantity types (RFC-009). The machine-readable manifest is [`template.yaml`](../templates/neocloud_deal/template.yaml).
 
 > Trade-off: deriving `p_acquired` from the distribution keeps the headline consistent with the per-candidate table by construction, and forces the model to say *who* it thinks buys. Spreading probability over up to 14 outcomes gives the model more ways to be wrong than one number, and most of the mass sits on `none`. The self-check and the ranking metrics in RFC-007 §4 exist to catch that.
 
@@ -315,7 +315,7 @@ Constraints are enforced fail-closed. If no route satisfies `provider_must_diffe
 - estimator: EvidenceMatrix and extractions only, no fetch or search;
 - auditor: evidence read (PIT view) only.
 
-**Conflict of interest.** Several candidates in this template are model providers. Routing records the provider of every role, and the ReviewPacket header shows a `provider_is_candidate` flag whenever a role's provider is also a named candidate in the thesis. It does not block the route. RFC-007 reports results split by that flag.
+**Conflict of interest.** Several candidates in this template are model providers. Routing records the provider of every role, and the ReviewPacket header shows a `provider_conflicts` entry whenever a role's provider is also a named candidate in the thesis. It does not block the route. RFC-007 reports results split by that flag.
 
 > Trade-off: putting the strongest model on the planner and estimator concentrates cost where judgment happens. Extraction is high-volume and checkable, so a cheap model is enough there. RFC-007 ablation A1 tests whether the strong estimator earns its cost. Provider diversity for the auditor is argued in RFC-006. Flagging rather than blocking provider-candidate overlap keeps the strongest models available, and the split results show whether the overlap biases anything.
 
@@ -323,7 +323,7 @@ Constraints are enforced fail-closed. If no route satisfies `provider_must_diffe
 
 Before an announcement there is no deal spread to back out a market-implied probability from. The comparison figure is instead a **reference prior**: a transparent, rule-based estimate of what a practitioner's default heuristic ("the biggest customer or investor is the likeliest buyer") would say.
 
-It is computed by code at every evaluation's `clock`, stored in `ThesisVersion.reference_prior` and `EvaluationRecord.reference_prior`, and shown next to the agent's estimates in the ReviewPacket. It is also baseline B1 in RFC-007. It is **not** a tracked quantity, never triggers the gate, and is never shown to the estimator.
+It is computed by code at every evaluation's `clock`, stored in the core `comparison_baseline` slot of the ThesisVersion and EvaluationRecord (id `rp-1`), and shown next to the agent's estimates in the ReviewPacket. It is also baseline B1 in RFC-007. It is **not** a tracked quantity, never triggers the gate, and is never shown to the estimator.
 
 **Inputs.** Only shared, document-local **extractions** (RFC-001) with `as_of ≤ clock`, never the estimator's `relationships` quantity. The prior therefore stays independent of the agent's judgment. It still depends on the extractor, which RFC-007 isolates with an oracle variant.
 
@@ -369,7 +369,7 @@ The prior computes structure tags itself, from extractions, using the rules in *
 
 Sections in order:
 
-1. Header, audit status, degradations, `provider_is_candidate` flags
+1. Header, audit status, degradations, `provider_conflicts` flags
 2. Acquirer table: per key (candidates, `other`, `none`), old → new probability, rank, and reference prior; derived `p_acquired` beneath
 3. Stake table: per candidate, old → new probability, resolved flag and structure tag, reference prior
 4. Signals: added and status changes, then unchanged signals collapsed; `secondary_only` signals marked

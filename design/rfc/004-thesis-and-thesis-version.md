@@ -28,7 +28,7 @@ Mutable metadata: `status` (`active | paused | resolved | archived`), `watching`
 
 Every `PUT` to a thesis creates a new `spec_revision`, and the thesis records the full spec for each revision. Every version and evaluation records the `spec_revision` it ran under.
 
-Schema: [`thesis.schema.json`](../schemas/thesis.schema.json).
+Schema: [`thesis.schema.json`](../schemas/core/thesis.schema.json).
 
 Example (`neocloud_deal`):
 
@@ -46,7 +46,7 @@ subject:
 sources:
   - type: edgar            # primary; candidate 10-K/10-Q routed only if they mention the target
     ciks: ["0000000001"]
-    candidate_tickers: [MSFT, NVDA]
+    related_tickers: [MSFT, NVDA]   # candidates' filings, routed only if they mention the target
     forms: ["8-K", "10-K", "10-Q", "S-1", "S-1/A", "SC 13D", "SC 13G", "D", "DEF 14A"]
   - type: press_release    # primary
     issuers: [gridcompute, anthropic, openai, microsoft, nvidia]
@@ -81,7 +81,7 @@ A ThesisVersion is an **immutable** snapshot of every tracked quantity at a give
 | `values` | The new value of every tracked quantity, typed by the template |
 | `deltas` | Per-quantity change against the parent: `changed`, the typed delta, and whether it is `material` and which rule fired |
 | `carried_forward` | Quantities not re-estimated in this evaluation, copied from the parent |
-| `reference_prior` | The template's rule-based reference prior at `clock`, with its inputs (RFC-008 §Reference prior). Shown next to the agent's estimate. It is **not** a tracked quantity, never triggers the gate, and is not an input to the estimator. |
+| `comparison_baseline` | The template's comparison baseline at `clock`, with its inputs (RFC-009); for `neocloud_deal`, the rule-based reference prior (RFC-008 §Reference prior). Shown next to the agent's estimate. It is **not** a tracked quantity, never triggers the gate, and is not an input to the estimator. |
 | `self_check` | Result of the estimator's pre-emit self-check (RFC-005 step 8) |
 | `recoveries` | Tool or extraction failures in this evaluation and how each was handled: retry, alternate path, or degraded (RFC-005) |
 | `review_packet_id` | Link to the ReviewPacket (RFC-006) |
@@ -89,7 +89,7 @@ A ThesisVersion is an **immutable** snapshot of every tracked quantity at a give
 | `cost`, `latency` | From content-free telemetry |
 | `content_hash` | Hash over everything above |
 
-Schema: [`thesis-version.schema.json`](../schemas/thesis-version.schema.json).
+Schema: [`thesis-version.schema.json`](../schemas/core/thesis-version.schema.json).
 
 **What is immutable.** Everything covered by `content_hash`. The review state is **not** part of the version's content. It is kept in a separate append-only `review_events` log: `needs_review → approved | rejected | superseded`. The API shows it as `review_state` on the version.
 

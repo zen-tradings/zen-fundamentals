@@ -1,0 +1,12 @@
+# Relationship vocabulary for neocloud_deal (RFC-008).
+# Key shape: <type>:<candidate>[:<slug>]
+types:
+  compute_contract:  { role: customer, note: "multi-year capacity agreement; value = total contract value, term_years" }
+  gpu_supply:        { role: supplier, note: "accelerator supply or allocation agreement" }
+  equity:            { role: investor, note: "stake, warrants, convertibles; ownership_pct when disclosed; structure label required" }
+  debt:              { role: lender,   note: "credit facility, GPU-backed financing; structure label required" }
+  capacity_backstop: { role: customer, note: "commitment to buy the target's unsold or unused capacity" }
+  board:             { role: investor, note: "board seat or observer right" }
+  partnership:       { role: partner,  note: "co-development, reseller, joint venture" }
+  "other:<slug>":    { role: any,      note: "anything else material" }
+statuses: [announced, active, expired, terminated]

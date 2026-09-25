@@ -12,11 +12,11 @@ The old audit step was a fact and style check on prose. A reviewer approving a c
 
 ## Proposal
 
-Every ThesisVersion has exactly one ReviewPacket, and it is immutable. Its layout comes from the template (RFC-008). Its structure is fixed by [`review-packet.schema.json`](../schemas/review-packet.schema.json).
+Every ThesisVersion has exactly one ReviewPacket, and it is immutable. Its layout comes from the template (RFC-008). Its structure is fixed by [`review-packet.schema.json`](../schemas/core/review-packet.schema.json).
 
 ### Contents
 
-**Header.** Thesis, version `seq`, parent version, `clock`, template version, `spec_revision`, trigger, routing (provider and model for each role, and a `provider_is_candidate` flag for any role whose provider is also a named candidate, RFC-008), audit status (`passed | failed | overridden`), and any degradations the budget forced (RFC-005).
+**Header.** Thesis, version `seq`, parent version, `clock`, template version, `spec_revision`, trigger, routing (provider and model for each role, and a `provider_conflicts` entry for any role whose provider is also a party named in the subject, RFC-009), audit status (`passed | failed | overridden`), and any degradations the budget forced (RFC-005).
 
 **Changes.** One entry per changed quantity:
 

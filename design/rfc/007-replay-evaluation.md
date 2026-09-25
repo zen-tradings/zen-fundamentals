@@ -373,7 +373,7 @@ One table per evaluation run. Each row is one `(configuration, variant, subset)`
 - variants: `clean`, `noise`, `injected_errors`, `faults`;
 - subsets: `H-named`, `H-anon`, `pre-cutoff-named (diagnostic)`.
 
-The row schema is [`eval-result-row.schema.json`](../schemas/eval-result-row.schema.json). A column that doesn't apply to a row is `—` (`null` in JSON).
+The row schema is [`eval-result-row.schema.json`](../schemas/core/eval-result-row.schema.json). A column that doesn't apply to a row is `—` (`null` in JSON).
 
 Core columns (every row):
 

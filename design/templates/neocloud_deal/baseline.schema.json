@@ -1,0 +1,33 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://raw.githubusercontent.com/zen-tradings/zen-fundamentals/main/design/templates/neocloud_deal/baseline.schema.json",
+  "title": "neocloud_deal comparison baseline inputs (rp-1)",
+  "description": "Inputs of the rp-1 reference prior, stored in comparison_baseline.inputs (RFC-008 Reference prior). comparison_baseline.values holds acquirer_distribution, p_acquired, and stake_probabilities.",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "years_remaining": { "type": "number", "minimum": 0 },
+    "b_listing": { "$ref": "../../schemas/core/quantity-types.schema.json#/$defs/Probability" },
+    "strategic_review_applied": { "type": "boolean" },
+    "w_other": { "type": "number", "minimum": 0 },
+    "per_candidate": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["key", "w", "m"],
+        "additionalProperties": false,
+        "properties": {
+          "key": { "$ref": "../../schemas/core/quantity-types.schema.json#/$defs/Key" },
+          "w": { "type": "number", "minimum": 0 },
+          "m": { "type": "number", "minimum": 0 },
+          "b_stake": { "$ref": "../../schemas/core/quantity-types.schema.json#/$defs/Probability" },
+          "relationship_keys": { "type": "array", "items": { "type": "string" } }
+        }
+      }
+    },
+    "extraction_evidence_ids": {
+      "type": "array",
+      "items": { "$ref": "../../schemas/core/quantity-types.schema.json#/$defs/EvidenceId" }
+    }
+  }
+}

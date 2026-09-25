@@ -30,7 +30,7 @@ Responsibilities:
 - run **document-local extraction**: extraction whose only inputs are one evidence item and a versioned extraction target from a template (for example `neocloud_deal.relationships@1`);
 - serve a **point-in-time view**: every read takes a `clock` and returns only items with `as_of ≤ clock`.
 
-Objects: `EvidenceItem` ([schema](../schemas/evidence-item.schema.json)) and `Extraction` (an evidence-derived artifact that inherits the `as_of` of its source item).
+Objects: `EvidenceItem` ([schema](../schemas/core/evidence-item.schema.json)) and `Extraction` (an evidence-derived artifact that inherits the `as_of` of its source item).
 
 Constraints. The evidence layer must not read:
 

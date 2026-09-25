@@ -34,7 +34,7 @@ subject:
 sources:                         # priority order
   - type: edgar                  # primary; candidate filings routed only if they mention the target
     ciks: ["0000000001"]
-    candidate_tickers: [MSFT, NVDA]
+    related_tickers: [MSFT, NVDA]   # candidates' filings, routed only if they mention the target
     forms: ["8-K", "10-K", "10-Q", "S-1", "SC 13D", "SC 13G", "D"]
   - type: press_release          # primary
     issuers: [gridcompute, anthropic, openai, microsoft, nvidia]
@@ -141,7 +141,9 @@ Early design. RFCs in [`design/rfc/`](design/rfc/):
 - [008](design/rfc/008-neocloud-deal-template.md): `neocloud_deal` template, outcome definitions, stake structure tags, rumor handling, reference prior
 - [009](design/rfc/009-template-contract.md): template contract: what a template provides, core quantity types, two-stage validation, chaining
 
-Schemas in [`design/schemas/`](design/schemas/): [Thesis](design/schemas/thesis.schema.json), [ThesisVersion](design/schemas/thesis-version.schema.json), [EvidenceItem](design/schemas/evidence-item.schema.json), [ReviewPacket](design/schemas/review-packet.schema.json), [eval results row](design/schemas/eval-result-row.schema.json).
+Core schemas in [`design/schemas/core/`](design/schemas/core/): [Thesis](design/schemas/core/thesis.schema.json), [ThesisVersion](design/schemas/core/thesis-version.schema.json), [EvidenceItem](design/schemas/core/evidence-item.schema.json), [ReviewPacket](design/schemas/core/review-packet.schema.json), [eval results row](design/schemas/core/eval-result-row.schema.json), [quantity types](design/schemas/core/quantity-types.schema.json).
+
+Templates in [`design/templates/`](design/templates/): [`neocloud_deal`](design/templates/neocloud_deal/) (manifest, subject, values, params, baseline, eval spec and metrics).
 
 Planned: OpenAPI spec, model capability profiles, replay dataset manifest and annotation guide, reference implementation.
 

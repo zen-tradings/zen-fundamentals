@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://raw.githubusercontent.com/zen-tradings/zen-fundamentals/main/design/schemas/evidence-item.schema.json",
+  "$id": "https://raw.githubusercontent.com/zen-tradings/zen-fundamentals/main/design/schemas/core/evidence-item.schema.json",
   "title": "EvidenceItem",
   "description": "An immutable, content-addressed item in the shared evidence layer (RFC-001). One item may be cited by many theses. Point-in-time rule: an item is visible to an estimation step only if as_of <= clock (RFC-005).",
   "type": "object",

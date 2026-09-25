@@ -1,0 +1,22 @@
+# Signal vocabulary for neocloud_deal (RFC-008). Direction and basis are typical, not fixed.
+signals:
+  strategic_review:                  { direction: raises,    basis: primary, note: "target exploring strategic alternatives or hired an advisor" }
+  "talks:<candidate>":               { direction: raises,    basis: secondary, note: "reported discussions with a candidate" }
+  "talks_denied:<candidate>":        { direction: lowers,    basis: either }
+  "concentration:<candidate>":       { direction: raises,    basis: primary, note: "candidate >= 20% of revenue or backlog" }
+  "financing:equity_round":          { direction: ambiguous, basis: either }
+  "financing:debt":                  { direction: ambiguous, basis: primary }
+  "financing:stress":                { direction: raises,    basis: primary, note: "covenant waiver, going-concern language, missed payment" }
+  "ipo:filed":                       { direction: ambiguous, basis: primary }
+  "ipo:priced":                      { direction: ambiguous, basis: primary }
+  "ipo:withdrawn":                   { direction: ambiguous, basis: primary }
+  "candidate:own_capacity:<candidate>": { direction: lowers, basis: primary, note: "candidate announces large self-built capacity" }
+  "candidate:capex_up:<candidate>":  { direction: ambiguous, basis: primary }
+  "control:founder_lock":            { direction: lowers,    basis: primary }
+  "regulatory:antitrust:<candidate>": { direction: lowers,   basis: primary }
+  "regulatory:foreign_ownership":    { direction: lowers,    basis: primary }
+  "regulatory:export_control":       { direction: ambiguous, basis: primary }
+  "leadership:change":               { direction: ambiguous, basis: primary }
+  "other:<slug>":                    { direction: any,       basis: any }
+statuses: [present, resolved, contradicted]
+rule: "A signal whose only support is secondary evidence is secondary_only, whatever its key."

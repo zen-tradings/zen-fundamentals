@@ -1,0 +1,233 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://raw.githubusercontent.com/zen-tradings/zen-fundamentals/main/design/schemas/core/eval-result-row.schema.json",
+  "title": "EvalResultRow",
+  "description": "One row of an RFC-007 results table: one (config, variant, subset) within a replay run. Core metrics apply to every template; template_metrics is validated against templates/<id>/eval-metrics.schema.json (stage two). Metrics that don't apply to the row are null.",
+  "type": "object",
+  "required": ["run_id", "template", "config", "variant", "subset", "valid", "n_units", "n_cases", "n_checkpoints", "repeats", "pit_violations", "metrics"],
+  "additionalProperties": false,
+  "properties": {
+    "run_id": { "type": "string" },
+    "template": { "$ref": "thesis.schema.json#/$defs/TemplateRef" },
+    "config": {
+      "type": "string",
+      "pattern": "^[A-Z][A-Za-z0-9-]{0,15}$",
+      "description": "Core configs: F full, A1 low-cost planner/estimator, A2 no auditor, G gate-off scoring of F. Baselines (B*) and extra ablations are defined by the template's eval spec."
+    },
+    "variant": { "enum": ["clean", "noise", "injected_errors", "faults"] },
+    "subset": {
+      "enum": ["H-named", "H-anon", "pre-cutoff-named"],
+      "description": "Headline rows are H-named and H-anon only; pre-cutoff-named is a contamination diagnostic."
+    },
+    "provider_conflict_split": {
+      "enum": ["all", "provider_conflict", "no_provider_conflict"],
+      "default": "all",
+      "description": "RFC-007 §4 split by provider conflicts (a role's provider is a subject party); 'all' for the main row."
+    },
+    "valid": {
+      "type": "boolean",
+      "description": "False if any point-in-time violation occurred; invalid rows are never reported as results."
+    },
+    "effective_cutoff": {
+      "type": ["string", "null"],
+      "format": "date",
+      "description": "max(stated training cutoff) across all models in the config; null for configs with no model."
+    },
+    "n_units": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Number of bootstrap resampling units (the template's cluster unit, e.g. targets or deals)."
+    },
+    "n_cases": { "type": "integer", "minimum": 0 },
+    "n_checkpoints": { "type": "integer", "minimum": 0 },
+    "repeats": { "type": "integer", "minimum": 1 },
+    "pit_violations": { "type": "integer", "minimum": 0 },
+    "metrics": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Core metrics (RFC-007 §4).",
+      "properties": {
+        "citation_precision_judge": { "$ref": "#/$defs/Estimate" },
+        "citation_precision_human": { "$ref": "#/$defs/Estimate" },
+        "citation_human_sample_n": { "type": ["integer", "null"], "minimum": 0 },
+        "judge_human_kappa": { "$ref": "#/$defs/Estimate" },
+        "cost_per_version_usd": { "$ref": "#/$defs/Percentiles" },
+        "cost_per_evaluation_usd": { "$ref": "#/$defs/Percentiles" },
+        "cost_per_scheduled_usd": { "$ref": "#/$defs/Percentiles" },
+        "latency_per_version_s": { "$ref": "#/$defs/Percentiles" },
+        "versions_per_case": { "type": ["number", "null"], "minimum": 0 },
+        "versions_per_case_month": { "type": ["number", "null"], "minimum": 0 },
+        "overrides_per_case": { "type": ["number", "null"], "minimum": 0, "description": "Including replay_auto overrides (RFC-004)." },
+        "unapproved_versions_per_case": {
+          "type": ["number", "null"],
+          "minimum": 0,
+          "description": "Versions left unapproved in replay because of non-waivable audit failures."
+        },
+        "repeat_spread_primary_sd": { "type": ["number", "null"], "minimum": 0, "description": "Between-repeat SD of the template's primary metric." }
+      }
+    },
+    "template_metrics": { "type": "object", "description": "Validated against templates/<id>/eval-metrics.schema.json (stage two)." },
+    "calibration": {
+      "type": "array",
+      "description": "Calibration tables over pooled probabilities at checkpoints. Bins and kinds are set by the template's eval spec.",
+      "items": {
+        "type": "object",
+        "required": ["kind", "bin_low", "bin_high", "n_probabilities", "n_cases", "mean_p", "observed_rate"],
+        "additionalProperties": false,
+        "properties": {
+          "kind": { "type": "string", "description": "e.g. pooled, or a quantity name." },
+          "bin_low": { "type": "number", "minimum": 0, "maximum": 1 },
+          "bin_high": { "type": "number", "minimum": 0, "maximum": 1 },
+          "n_probabilities": { "type": "integer", "minimum": 0 },
+          "n_cases": { "type": "integer", "minimum": 0 },
+          "mean_p": { "type": ["number", "null"], "minimum": 0, "maximum": 1 },
+          "observed_rate": { "type": ["number", "null"], "minimum": 0, "maximum": 1 }
+        }
+      }
+    },
+    "robustness": {
+      "type": ["object", "null"],
+      "description": "Filled only for variant rows (noise, injected_errors, faults). Distractor types and template error classes come from the template's eval spec; fault classes are core.",
+      "additionalProperties": false,
+      "properties": {
+        "noise": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "by_type": {
+              "type": "object",
+              "propertyNames": { "pattern": "^[a-z][a-z0-9_]{1,63}$" },
+              "additionalProperties": {
+                "type": "object",
+                "required": ["n_distractors"],
+                "additionalProperties": false,
+                "properties": {
+                  "n_distractors": { "type": "integer", "minimum": 0 },
+                  "induced_change_rate": { "$ref": "#/$defs/Estimate" },
+                  "citation_rate_support": { "$ref": "#/$defs/Estimate" },
+                  "citation_rate_support_unflagged": {
+                    "$ref": "#/$defs/Estimate",
+                    "description": "Cited in support of a change without the secondary_only flag (templates that opt in). Must be 0."
+                  },
+                  "citation_rate_uncertain_only": { "$ref": "#/$defs/Estimate" },
+                  "drift": {
+                    "type": "object",
+                    "description": "Template-defined drift measures, keyed by name.",
+                    "additionalProperties": { "$ref": "#/$defs/Estimate" }
+                  }
+                }
+              }
+            },
+            "noisy_minus_clean_primary": { "$ref": "#/$defs/Estimate", "description": "Paired difference in the template's primary metric." }
+          }
+        },
+        "injected_errors": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "by_class": {
+              "type": "object",
+              "propertyNames": { "pattern": "^[a-z][a-z0-9_]{1,63}$" },
+              "description": "Core classes (missing_citation, future_citation, wrong_citation, unflagged_secondary, type_invariant) plus template classes.",
+              "additionalProperties": {
+                "type": "object",
+                "required": ["n_injected"],
+                "additionalProperties": false,
+                "properties": {
+                  "n_injected": { "type": "integer", "minimum": 0 },
+                  "self_check_catch_rate": { "$ref": "#/$defs/Estimate" },
+                  "downstream_catch_rate": { "$ref": "#/$defs/Estimate" },
+                  "escape_rate": { "$ref": "#/$defs/Estimate" }
+                }
+              }
+            },
+            "overall_self_check_catch_rate": { "$ref": "#/$defs/Estimate" },
+            "overall_escape_rate": { "$ref": "#/$defs/Estimate" }
+          }
+        },
+        "faults": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "by_class": {
+              "type": "object",
+              "propertyNames": {
+                "enum": ["fetch_5xx", "fetch_timeout", "rate_limited", "malformed_document", "extractor_malformed", "extractor_timeout", "route_outage"]
+              },
+              "additionalProperties": {
+                "type": "object",
+                "required": ["n_injected"],
+                "additionalProperties": false,
+                "properties": {
+                  "n_injected": { "type": "integer", "minimum": 0 },
+                  "recovery_rate": { "$ref": "#/$defs/Estimate" },
+                  "safe_failure_rate": { "$ref": "#/$defs/Estimate" },
+                  "unsafe_rate": { "$ref": "#/$defs/Estimate" }
+                }
+              }
+            },
+            "recovery_rate": { "$ref": "#/$defs/Estimate" },
+            "safe_failure_rate": { "$ref": "#/$defs/Estimate" },
+            "unsafe_rate": { "$ref": "#/$defs/Estimate" },
+            "recording_completeness": { "$ref": "#/$defs/Estimate" },
+            "added_latency_s": { "$ref": "#/$defs/Percentiles" },
+            "added_cost_usd": { "$ref": "#/$defs/Percentiles" }
+          }
+        }
+      }
+    },
+    "exclusions_ref": { "type": "string", "description": "Path or URL of exclusions.csv for this run (RFC-007 §7.2)." }
+  },
+  "allOf": [
+    {
+      "if": { "properties": { "pit_violations": { "minimum": 1 } } },
+      "then": { "properties": { "valid": { "const": false } } }
+    }
+  ],
+  "$defs": {
+    "Estimate": {
+      "description": "Point estimate with a 95% clustered bootstrap CI over the template's cluster unit (null when not applicable).",
+      "oneOf": [
+        { "type": "null" },
+        {
+          "type": "object",
+          "required": ["value"],
+          "additionalProperties": false,
+          "properties": { "value": { "type": "number" }, "ci_low": { "type": "number" }, "ci_high": { "type": "number" } }
+        }
+      ]
+    },
+    "Summary": {
+      "oneOf": [
+        { "type": "null" },
+        {
+          "type": "object",
+          "required": ["median", "mean", "n"],
+          "additionalProperties": false,
+          "properties": {
+            "median": { "type": "number" },
+            "mean": { "type": "number" },
+            "n": {
+              "type": "integer",
+              "minimum": 0,
+              "description": "Number of events or cases summarized; CIs are omitted when n < 5."
+            },
+            "ci_low_median": { "type": "number" },
+            "ci_high_median": { "type": "number" }
+          }
+        }
+      ]
+    },
+    "Percentiles": {
+      "oneOf": [
+        { "type": "null" },
+        {
+          "type": "object",
+          "required": ["p50", "p90"],
+          "additionalProperties": false,
+          "properties": { "p50": { "type": "number", "minimum": 0 }, "p90": { "type": "number", "minimum": 0 } }
+        }
+      ]
+    }
+  }
+}

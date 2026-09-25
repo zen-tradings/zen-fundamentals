@@ -123,7 +123,7 @@ Gate outcomes:
 
 ### EvaluationRecord
 
-This records the evidence and the no-change decision without notifying anyone. Fields: `thesis_id`, `spec_revision`, `clock`, `trigger`, `evidence_set`, `impact_assessment`, `proposed_values` (when estimation ran), `deltas_vs_head`, `decision` (`no_impact | no_change | below_threshold | consistent_with_pending | version_created`), `version_id` (when created), `reference_prior`, `self_check`, `recoveries`, `routing`, `cost`, `latency`. Records are immutable and written in the same fenced transaction as any version.
+This records the evidence and the no-change decision without notifying anyone. Fields: `thesis_id`, `spec_revision`, `clock`, `trigger`, `evidence_set`, `impact_assessment`, `proposed_values` (when estimation ran), `deltas_vs_head`, `decision` (`no_impact | no_change | below_threshold | consistent_with_pending | version_created`), `version_id` (when created), `comparison_baseline`, `self_check`, `recoveries`, `routing`, `cost`, `latency`. Records are immutable and written in the same fenced transaction as any version.
 
 ### Failure recovery
 
