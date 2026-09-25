@@ -24,7 +24,7 @@ A template defines:
 4. the ReviewPacket layout;
 5. default `material_change` thresholds.
 
-It also defines dependency edges between quantities, deterministic impact rules, resolution-class evidence, the heartbeat cadence, routing constraints, and self-check tolerances.
+It also defines dependency edges between quantities, deterministic impact rules, resolution-class evidence, the scheduled re-estimate cadence, routing constraints, and self-check tolerances.
 
 Templates follow semver, and a thesis pins `{id, version}`:
 
@@ -253,13 +253,17 @@ These rules are applied before the planner, and they can only add affected quant
 | A supply, compute, or backstop agreement with a candidate within 90 days of that candidate's equity or debt (either order) | `relationships` (the structure tag may change), `acquirer_distribution`, `stake_probabilities` |
 | Disclosure that milestone warrants vested | `relationships`, `stake_probabilities` (resolution-class for that candidate's stake if the threshold is met) |
 | News naming the target and a candidate with "talks", "in discussions", "weighing", "nearing a deal" | `signals`, `acquirer_distribution`, `stake_probabilities` |
-| Heartbeat | `acquirer_distribution`, `stake_probabilities`, `expected_announcement_date` |
+| Scheduled re-estimate | `acquirer_distribution`, `stake_probabilities`, `expected_announcement_date` |
 
-## Heartbeat
+## Scheduled re-estimate
 
-Probabilities over a fixed horizon should fall as the horizon runs out with nothing happening. So this template requires a **heartbeat**: if no evaluation has run for `heartbeat_days` (default 30), a heartbeat evaluation runs with `trigger: heartbeat`, `clock` = the heartbeat time, and no new evidence. It re-estimates the time-sensitive quantities listed in the impact rules. A heartbeat evaluation goes through the same gate as any other, so most heartbeats end as `below_threshold` records.
+Probabilities over a fixed horizon should fall as the horizon runs out with nothing happening. So this template requires a **scheduled re-estimate**: if no evaluation has run for `reestimate_days` (default 30), an evaluation runs with `trigger: scheduled`, `clock` = the scheduled time, and no new evidence. It re-estimates the time-sensitive quantities listed in the impact rules. A scheduled evaluation goes through the same gate as any other, so most end as `below_threshold` records. Its changes are justified by a `computed` elapsed-time claim plus the evidence the head already cited (RFC-005 step 8), since there is no new evidence to cite. (This is unrelated to the worker lease heartbeat in RFC-003.)
 
-> Trade-off: a heartbeat costs one estimator call per thesis per month with no new information. Without it, the approved head would keep a 12-month probability unchanged until month 11, and RFC-007 would score that stale number at every checkpoint.
+> Trade-off: a scheduled re-estimate costs one estimator call per thesis per month with no new information. Without it, the approved head would keep a 12-month probability unchanged until month 11, and RFC-007 would score that stale number at every checkpoint.
+
+## Budget degrade order
+
+Under budget or latency pressure (RFC-005): drop `low`-reliability secondary evidence → skip dependency-only re-estimates → drop `normal`-reliability news not behind a `talks:*` signal the head relies on → hold the job. `high`-reliability news is never dropped.
 
 ## Default material-change thresholds
 
@@ -279,7 +283,7 @@ material_change:
 prior_gap_flag: 3.0      # odds ratio between agent and reference prior on p_acquired, or a different top candidate
 stake_min_pct: 0.05
 stake_min_usd: 1000000000
-heartbeat_days: 30
+reestimate_days: 30
 ```
 
 `on_top_rank_change`: a change in which candidate (excluding `none`) has the highest probability is material, even when no single probability crosses the threshold.
@@ -407,5 +411,5 @@ Sections in order:
 - **Structure tag edges.** Is 90 days the right window for linking equity to a commercial agreement? Circular deals can be spread over longer periods, and unrelated deals can fall inside the window by coincidence.
 - **Several structures in one relationship.** A candidate might hold a pure-equity stake from years ago and later add vendor financing. Is one tag per relationship item enough, or should each tranche be its own item?
 - **Partial asset deals.** A candidate buying one data-center campus from the target isn't control of the target. Should a large enough asset purchase be a third event type?
-- **Heartbeat cadence.** Monthly is a guess. Should it tighten as the horizon end approaches?
+- **Scheduled re-estimate cadence.** Monthly is a guess. Should it tighten as the horizon end approaches?
 - **Same target, different theses.** Two theses on the same target with different candidate lists can disagree about `p_acquired`. Judgment isolation (RFC-001) means nothing reconciles them. Is that acceptable to users?

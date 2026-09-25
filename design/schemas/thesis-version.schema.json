@@ -38,8 +38,8 @@
       "required": ["kind", "evidence_ids"],
       "additionalProperties": false,
       "properties": {
-        "kind": { "enum": ["initial", "evidence", "heartbeat", "manual", "spec_revision", "resolution"] },
-        "evidence_ids": { "type": "array", "items": { "$ref": "#/$defs/EvidenceId" }, "description": "Empty for heartbeat." }
+        "kind": { "enum": ["initial", "evidence", "scheduled", "manual", "spec_revision", "resolution"] },
+        "evidence_ids": { "type": "array", "items": { "$ref": "#/$defs/EvidenceId" }, "description": "Empty for scheduled." }
       }
     },
     "evidence_set": {

@@ -2,13 +2,13 @@
 
 Status: Discussion
 
-Date: 2026-09-23
+Date: 2026-09-23 (revised 2026-09-24 for `neocloud_deal`)
 
 Depends on: RFC-001 (evidence vs. judgment), RFC-002 (lifecycles), RFC-003 (fencing)
 
 ## Problem
 
-The product's core object used to be a newsletter: an audience, a cadence, and channels, producing articles. That doesn't fit a research agent whose job is to hold a view on something and keep that view current. What we need to audit is **what the agent believed, when, and why**. The prose around it matters much less.
+The product's core object used to be a newsletter: an audience, a cadence, and channels, producing articles. That doesn't fit a research agent whose job is to hold a view and keep it current, such as "who is likely to buy or take a stake in this neocloud within the next 12 months". What we need to audit is **what the agent believed, when, and why**: which candidate it ranked first after a given filing, what evidence moved that, and whether a human approved it. The prose around it matters much less.
 
 ## Proposal
 
@@ -20,8 +20,8 @@ A thesis is a long-lived, declarative spec for a view the agent maintains about 
 |---|---|
 | `subject` | What the thesis is about. It is template-typed; for `neocloud_deal` it names the target, the candidate acquirers and investors, and the horizon. |
 | `template` | `{id, version}` of the centrally maintained template it instantiates (RFC-008). |
-| `tracked_quantities` | The quantities the agent estimates. They default to the template's list, and a thesis can only disable optional quantities; it cannot add new ones. |
-| `sources` | Adapter configs (EDGAR, press releases, web search) with priority and tier. |
+| `tracked_quantities` | The quantities the agent estimates. They default to the template's list, and a thesis can only disable optional quantities; it cannot add new ones. Every `neocloud_deal` quantity is required. |
+| `sources` | Adapter configs (EDGAR, press releases, named-outlet news, web search) with priority and tier. |
 | `policy` | Material-change thresholds (overriding template defaults), budget, latency, review mode, and routing overrides that stay within template constraints. |
 
 Mutable metadata: `status` (`active | paused | resolved | archived`), `watching` (bool), `head_version_id`, `spec_revision`.
@@ -76,7 +76,7 @@ A ThesisVersion is an **immutable** snapshot of every tracked quantity at a give
 | `parent_version_id` | The approved head this version was diffed against (null for the initial version) |
 | `spec_revision`, `template` | The config and template version it ran under |
 | `clock` | Point-in-time bound. No evidence with `as_of > clock` influenced this version. |
-| `trigger` | `initial | evidence | heartbeat | manual | spec_revision | resolution`, plus the triggering evidence IDs (empty for `heartbeat`) |
+| `trigger` | `initial | evidence | scheduled | manual | spec_revision | resolution`, plus the triggering evidence IDs (empty for `scheduled`) |
 | `evidence_set` | Every evidence ID visible to and used by the estimator, with a hash of the sorted set |
 | `values` | The new value of every tracked quantity, typed by the template |
 | `deltas` | Per-quantity change against the parent: `changed`, the typed delta, and whether it is `material` and which rule fired |
@@ -105,7 +105,7 @@ A version is created only when the material-change gate says yes (RFC-005), and 
 
 - on the initial evaluation after a thesis is created (`trigger: initial`);
 - on resolution evidence (`trigger: resolution`, always material), including partial resolutions such as a candidate's stake event (RFC-008);
-- on a manual `run`, a spec revision, or a template heartbeat when some quantity changes materially.
+- on a manual `run`, a spec revision, or a template's scheduled re-estimate when some quantity changes materially.
 
 Non-material evaluations produce an **EvaluationRecord**, not a version (RFC-005). EvaluationRecords are immutable too, but nobody is notified about them and they never become the head.
 
@@ -122,7 +122,7 @@ needs_review┼──────────────► rejected   (head un
 - Only one candidate is pending per thesis at a time. A newer material candidate supersedes the pending one. The newer one's deltas and ReviewPacket are computed against the approved head, so a reviewer always sees the cumulative change since the last approved view. Superseded versions are kept and linked (`supersedes`).
 - If a newer candidate is within the material-change threshold of the pending candidate, it does **not** supersede. It is recorded as an EvaluationRecord with decision `consistent_with_pending`. This stops reviewers from being interrupted mid-review by noise.
 - `approved` requires the audit to have passed, or an explicit override reason (RFC-006).
-- In replay evaluation only, `review: auto` approves each version at commit so the timeline can be scored without humans (RFC-007). Live theses reject `review: auto`.
+- In replay evaluation only, `review: auto` approves each version at commit so the timeline can be scored without humans (RFC-007). Live theses reject `review: auto`. Auto-approval follows the same audit rule as a human, with one scripted exception: a version whose **only** audit failure is the `secondary_only` rumor check (RFC-008 *Rumor handling*) is approved with the override reason `replay_auto`. This stands in for a reviewer who accepts the rumor. Without it, rumor-driven moves could never reach the head in replay, and lead time and the rumor metrics would measure nothing. Any other audit failure leaves the version unapproved and the head unchanged. RFC-007 reports `replay_auto` overrides per case.
 
 > Trade-off: superseding means a reviewer never signs off on intermediate candidates, so some intermediate reasoning gets less human scrutiny. We accept that because the alternative, a review queue that grows with filing frequency, would make human review a bottleneck exactly when a target is busiest (a financing, an IPO filing, and a wave of reported talks in the same week).
 
@@ -148,10 +148,11 @@ Resolved live theses are post-cutoff for every model already deployed, which mak
 
 | RFC-002 lifecycle | Here |
 |---|---|
-| Research | Evidence ingest job (RFC-001) |
-| Thesis version | Evaluation job (`queued → running → needs_input → running → completed | failed | cancelled | superseded`), producing a ThesisVersion or an EvaluationRecord |
-| Delivery | Optional webhook on `approved`, via the outbox |
-| Evaluation | Outcome audits and replay (RFC-007) |
+| Evidence ingest | Filings, releases, and news fetched for the target and candidates (RFC-001) |
+| Evaluation | Evaluation job (`queued → running ⇄ needs_input → completed | failed | cancelled | superseded`), producing a ThesisVersion or an EvaluationRecord |
+| Version review | `needs_review → approved | rejected | superseded`, in `review_events` |
+| Delivery | Optional webhook on `approved` or `thesis_resolved`, via the outbox |
+| Replay run | Replay evaluation (RFC-007); live outcome audits reuse its metrics |
 
 The version, its ReviewPacket, and any outbox intent are written in a single transaction guarded by the RFC-003 fencing predicate (`job_id, attempt_no, lease_owner, lease_expires_at > now()`). `seq` is allocated inside that transaction. A stale attempt affects zero rows and can't create a version.
 

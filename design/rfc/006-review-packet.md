@@ -2,7 +2,7 @@
 
 Status: Discussion
 
-Date: 2026-09-23
+Date: 2026-09-23 (revised 2026-09-24 for `neocloud_deal`)
 
 Depends on: RFC-004, RFC-005
 
@@ -16,7 +16,7 @@ Every ThesisVersion has exactly one ReviewPacket, and it is immutable. Its layou
 
 ### Contents
 
-**Header.** Thesis, version `seq`, parent version, `clock`, template version, `spec_revision`, trigger, routing (provider and model for each role), audit status (`passed | failed | overridden`), and any degradations the budget forced (RFC-005).
+**Header.** Thesis, version `seq`, parent version, `clock`, template version, `spec_revision`, trigger, routing (provider and model for each role, and a `provider_is_candidate` flag for any role whose provider is also a named candidate, RFC-008), audit status (`passed | failed | overridden`), and any degradations the budget forced (RFC-005).
 
 **Changes.** One entry per changed quantity:
 
@@ -27,6 +27,8 @@ Every ThesisVersion has exactly one ReviewPacket, and it is immutable. Its layou
 **Candidate tables.** For templates with a `candidate_distribution` or `probability_map` quantity (`neocloud_deal`), the packet shows per-candidate tables instead of only the headline probability. The acquirer table has one row per key (each candidate, `other`, `none`), with old and new probability, old and new rank, the absolute and log-odds deltas, and the claims behind each row. The derived `p_acquired` appears beneath it as a `computed` claim, with the formula shown. The stake table has one row per candidate with old and new probability and the resolved flag. A reviewer can then see *why* the headline moved. For example, `p_acquired` may have held steady while probability shifted from one AI lab to a hyperscaler.
 
 **Reference-prior comparison.** Next to each agent probability, the packet shows the template's `reference_prior` at the same `clock`, the extracted relationships it used, and the formula version (RFC-008). An odds ratio on `p_acquired` beyond the template's `prior_gap_flag` (default 3.0, a starting point to be tuned), or a different top-ranked candidate, is listed automatically as an investor judgment item: "Agent and reference prior disagree; which view do you hold?" The prior is context for the reviewer. It is not a claim the agent makes, and it is not audited as one.
+
+**Relationships and signals.** Added, removed, and changed relationships between the target and each candidate, including structure-tag changes (for example an equity stake re-tagged `vendor_financing` once a linked GPU supply agreement is disclosed) with the linked relationships that justify the tag. Candidates with no relationship found are listed explicitly. Signals are shown the same way, with `secondary_only` signals marked.
 
 **Self-check.** The estimator's self-check result (RFC-005 step 8): each check, pass or fail, whether a revision happened, and what changed in the revision.
 
@@ -40,7 +42,7 @@ Every ThesisVersion has exactly one ReviewPacket, and it is immutable. Its layou
 
 **Investor judgment items.** Questions the model recommends a human decide. Each has `question`, `why` (why this is judgment rather than fact), `related_quantities`, and optional `considerations`. Examples from `neocloud_deal`: whether a reported-talks item is credible, and whether a candidate would rather keep buying capacity by contract than buy the company.
 
-**Evidence appendix.** Every evidence item cited anywhere in the packet, with `source`, `tier` (`primary` / `secondary`), `doc_type`, `as_of`, URL or accession number, and content hash.
+**Evidence appendix.** Every evidence item cited anywhere in the packet, with `source` (including the outlet and its reliability for news), `tier` (`primary` / `secondary`), `doc_type`, `as_of` and how it was determined, URL or accession number, and content hash.
 
 **Audit summary.** Checks run, failures, the repair attempt (if any), and whether the packet was selected for human spot-checking (RFC-007).
 
@@ -78,7 +80,7 @@ The auditor checks the labels. A claim labeled `extracted` whose quote doesn't e
 | Quote exists verbatim at the locator | code | citation `unsupported` |
 | Quote supports the claim | auditor model | `partial` / `unsupported`, one estimator repair, then flagged |
 | `extracted` label justified | auditor model | downgrade to `inferred` |
-| Every changed quantity has at least one claim with a primary-tier citation, or is flagged uncertain | code | packet `audit: failed` |
+| Every changed quantity has at least one claim with a primary-tier citation, or is flagged uncertain. A change from a `scheduled` re-estimate satisfies this with the elapsed-time `computed` claim plus primary citations carried from the head (RFC-005 step 8) | code | packet `audit: failed` |
 | A changed quantity whose claims cite only secondary-tier evidence is flagged `secondary_only` (templates that opt in, such as `neocloud_deal`) | code | flag added; packet `audit: failed`, so approval needs an override (RFC-008 *Rumor handling*) |
 
 The auditor runs on a low-cost model **from a different provider than the estimator** (RFC-008). If no model satisfying that constraint is available, the job is held, fail-closed, rather than audited by the same provider.
@@ -89,6 +91,7 @@ The auditor runs on a low-cost model **from a different provider than the estima
 
 - `audit: passed` → `approve` allowed.
 - `audit: failed` → `approve` requires an `override_reason`, recorded in `review_events`, and the packet shows `audit: overridden` in any later view.
+- In replay only, a version whose sole audit failure is `secondary_only` is auto-approved with `override_reason: replay_auto` (RFC-004).
 - A point-in-time violation never reaches review, because the job fails before commit.
 
 ### Rendering
@@ -98,4 +101,4 @@ The packet is JSON. `GET /v1/versions/:id/review-packet?format=md` renders it wi
 ## Open questions
 
 - Should `partial` citations block approval like `unsupported`, or only be flagged?
-- How should the packet show evidence that is *absent*? For example, a candidate's 10-K no longer mentions the target as a supplier, and that absence is itself informative. Is "absence" a claim type with no citation?
+- How should the packet show evidence that is *absent*? For example, a candidate's 10-K no longer mentions the target as a supplier, and that absence is itself informative. Is "absence" a claim type with no citation? The packet already lists candidates with no relationship found; should that generalize?

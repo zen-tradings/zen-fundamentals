@@ -108,7 +108,7 @@
         "judge_human_kappa": { "$ref": "#/$defs/Estimate" },
         "cost_per_version_usd": { "$ref": "#/$defs/Percentiles" },
         "cost_per_evaluation_usd": { "$ref": "#/$defs/Percentiles" },
-        "cost_per_heartbeat_usd": { "$ref": "#/$defs/Percentiles" },
+        "cost_per_scheduled_usd": { "$ref": "#/$defs/Percentiles" },
         "latency_per_version_s": { "$ref": "#/$defs/Percentiles" },
         "versions_per_case": { "type": ["number", "null"], "minimum": 0 },
         "versions_per_case_month": { "type": ["number", "null"], "minimum": 0 },

@@ -1,107 +1,112 @@
-# RFC-002: Separate Job Lifecycle State Machines for Research, Thesis Versions, Delivery, and Evaluation
+# RFC-002: Separate Lifecycle State Machines for Evidence Ingest, Evaluation, Version Review, Delivery, and Replay
 
 Status: Discussion
 
-Date: 2026-07-23
+Date: 2026-07-23 (rewritten 2026-09-24 for `neocloud_deal`)
 
-Entity rename (2026-09-23): "report" / "issue" → **thesis version** (see RFC-004). RFC-005 maps these lifecycles onto evaluation jobs and version review states.
+Depends on: RFC-001, RFC-003
 
 ## Problem
 
-The current design defines a research job as the unit of work.
+One neocloud thesis touches several kinds of work that fail independently:
 
-The lifecycle includes:
+- fetching a candidate's 10-K that mentions the target;
+- evaluating the thesis after that filing (impact, extraction, estimate, self-check, audit);
+- a human reviewing the resulting version;
+- sending the webhook once the version is approved;
+- replaying hundreds of historical target-windows for evaluation.
 
-1. Create
-2. Claim
-3. Research
-4. Produce
-5. Deliver
-6. Evaluate
+If a single job with one status (`queued → running → succeeded | failed`) tracked all of that, it couldn't represent common mixed outcomes:
 
+- The 10-K was ingested, the evaluation produced a version, but the webhook failed. Is the job failed?
+- The evaluation is waiting for the thesis owner to confirm which "GridCompute" a news article means (`needs_input`). Is the job running?
+- A newer SC 13D arrived while a version was waiting for review. What happens to the pending version?
+- The thesis owner added a candidate mid-horizon. What happens to evaluations already running under the old candidate list?
 
-The same job tracks work across the entire pipeline.
+A single status also makes recovery unsafe: retrying "the job" after a webhook failure would re-run the estimator and could create a second version from the same evidence.
 
+## Proposal
 
-## Potential Issue
+Give each kind of work its own lifecycle, owned by its own layer. Every job uses leased execution with fencing tokens (RFC-003), so a stale attempt can't move any lifecycle forward.
 
-A single job state:
+### 1. Evidence ingest (evidence layer, RFC-001)
 
-queued → running → succeeded/failed
+```
+queued → running → completed
+                 ↘ failed
+```
 
-cannot clearly represent:
+One ingest job per adapter run (for example "EDGAR filings for the target's CIK since the last cursor", or "news from the configured outlets"). `failed` means the evidence isn't visible yet. It never fails a thesis or a version. Retries honor `Retry-After`, and a document that can't be normalized is stored as `normalize_failed` and isn't citable (RFC-005 *Failure recovery*).
 
-Example:
+### 2. Evaluation (judgment layer, RFC-005)
 
-Research succeeded,
-thesis version generated,
-delivery failed.
+```
+queued → running ⇄ needs_input
+            │
+            ├──→ completed    (commits a ThesisVersion or an EvaluationRecord)
+            ├──→ failed       (self_check_failed, point_in_time_violation, budget_exceeded, rate_limited, …)
+            ├──→ cancelled    (DELETE /v1/evaluations/:id before commit)
+            └──→ superseded   (a spec revision made this job's inputs stale)
+```
 
-What should the job status be?
+- One evaluation job per batch of routed evidence, per scheduled re-estimate (`trigger: scheduled`), per manual run, or per resolution event (an acquisition announcement, or a candidate's stake crossing the threshold).
+- `clock` is fixed at creation (RFC-005 step 4). Evidence that arrives later waits for the next job.
+- `needs_input` pauses the job for a question to the thesis owner, for example which of two similarly named companies is the target. It resumes via `POST /v1/evaluations/:id/answer`.
+- A spec revision (adding or removing a candidate) supersedes every queued or running job from older revisions.
+- Idempotency key: `(thesis_id, spec_revision, clock, hash(evidence_set))`. A re-delivered batch or a reclaimed job can't produce a second version for the same inputs.
+- A terminal failure never rewrites a committed version.
 
-The current model may make failure recovery harder
+### 3. Version review (judgment layer, RFC-004)
 
-## Proposal for Discussion
+```
+needs_review ──→ approved    (becomes head; enqueues delivery via the outbox)
+             ├─→ rejected    (reason required; head unchanged)
+             └─→ superseded  (a newer material candidate replaced it before review)
+```
 
-Consider separating lifecycle ownership:
+- Review state lives in an append-only `review_events` log, outside the version's `content_hash`.
+- Only one candidate is pending per thesis. A newer material candidate supersedes it and is diffed against the approved head, so a reviewer always sees the cumulative change since the last approved view.
+- Approving a version whose audit failed, for example a change driven only by a reported-talks article, requires an `override_reason` (RFC-006, RFC-008 *Rumor handling*).
+- Evaluation and review are separate lifecycles: an evaluation is `completed` as soon as its version is committed, whatever the reviewer later decides.
 
+### 4. Delivery (outbox, RFC-003)
 
-## Research Lifecycle
+```
+pending → sending → sent
+                  ↘ failed → pending (retry with backoff)
+                  ↘ dead      (retry budget exhausted; visible on the thesis)
+```
 
-Example:
+One delivery per approved version (or per `thesis_resolved` event), created in the same fenced transaction as the approval. A delivery failure never touches the version or the evaluation. Retrying it re-sends the same signed payload; it never re-runs any estimation.
 
-queued
-↓
-running
-↓
-completed
-↓
-failed
+### 5. Replay evaluation run (RFC-007)
 
+```
+queued → preparing → running → scoring → completed
+                  ↘          ↘         ↘ failed
+                                          invalid (any point-in-time violation)
+```
 
-Responsible for research execution and evidence collection
+- `preparing` builds the frozen corpus view, the anonymized namespaces, and the knowledge probes.
+- `running` replays every `(case, configuration, repeat)` as ordinary evaluation jobs in virtual time, with their own lifecycle (§2) and `review: auto`.
+- `invalid` is terminal and separate from `failed`: the run finished, but a point-in-time violation means none of its numbers may be reported (RFC-007 §2.3).
 
-## Thesis Version Lifecycle
+## Mapping
 
-Example:
+| Work | Lifecycle | Commits | Retried how |
+|---|---|---|---|
+| Fetch and normalize filings, releases, news | Evidence ingest | EvidenceItems | Next adapter run |
+| Re-estimate a thesis | Evaluation | ThesisVersion or EvaluationRecord (+ ReviewPacket) | Reclaimed by lease; idempotency key blocks duplicates |
+| Human decision | Version review | `review_events` row | Not retried; a human acts |
+| Webhook | Delivery | Delivery attempt rows | Outbox backoff |
+| Historical evaluation | Replay run | Results table, exclusions | Whole run re-queued; cached agent calls reused where inputs are unchanged |
 
-queued
-↓
-generating
-↓
-generated
-↓
-failed
+## Trade-offs
 
+- **More states to reason about.** Five lifecycles are harder to explain than one job status. In return, every mixed outcome above has an unambiguous state, and every retry repeats exactly one kind of work.
+- **Cross-lifecycle queries.** "What happened after that SC 13D?" now joins the ingest job, the evaluation job, the version's review events, and any delivery. The API exposes that join on `GET /v1/theses/:id` and `GET /v1/versions/:id`, so clients don't have to.
 
-Responsible for per-thesis version creation
+## Open questions
 
-## Delivery Lifecycle
-
-Example:
-
-pending
-↓
-sending
-↓
-sent
-↓
-failed
-
-
-Responsible for external delivery
-
-## Evaluation Lifecycle
-
-Example:
-
-pending
-↓
-running
-↓
-completed
-↓
-failed
-
-
-Responsible for quality evaluation
+- Should `needs_input` time out, and if so, should the evaluation fail or continue without the answer (flagging the affected quantities uncertain)?
+- Should a `dead` delivery raise an alert on the thesis, or only appear in its status?

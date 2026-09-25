@@ -2,7 +2,7 @@
 
 Status: Discussion
 
-Date: 2026-09-23
+Date: 2026-09-23 (revised 2026-09-24 for `neocloud_deal`)
 
 Depends on: RFC-001, RFC-002, RFC-003, RFC-004
 
@@ -18,15 +18,16 @@ The old monitor loop scored "novelty" and published once novelty crossed a thres
 evidence layer                     judgment layer (per thesis)
 ──────────────                     ────────────────────────────────────────────────────────────────
 ingest ─▶ as_of + tier ─▶ route ─▶ batch ─▶ impact ─▶ extract ─▶ estimate ─▶ self-check ─▶ audit ─▶ gate ─┬─▶ ThesisVersion (needs_review)
-(adapters)                (by CIK,  (debounce)  (planner) (extractor) (estimator) (estimator   (auditor)  └─▶ EvaluationRecord (no notify)
-                          form)                                                  + code)
+(adapters:                (by CIK,  (debounce;  (planner) (extractor) (estimator) (estimator   (auditor)  └─▶ EvaluationRecord (no notify)
+ EDGAR, press,             form,     or
+ news, web)                mention)  scheduled)                                   + code)
 ```
 
 Every step from `impact` onward runs with a fixed `clock` (see *Point-in-time*). Tool and extraction failures at any step go through *Failure recovery* below.
 
 ### Steps
 
-1. **Ingest (evidence layer).** Adapters `discover → fetch → normalize`. Each item gets `as_of`, `tier`, `doc_type`, and entity links (CIKs, tickers). Duplicates are dropped by content hash.
+1. **Ingest (evidence layer).** Adapters `discover → fetch → normalize`. Each item gets `as_of`, `tier`, `doc_type`, and entity links (CIKs, tickers, and named companies for private targets and candidates such as AI labs that have no CIK). Duplicates are dropped by content hash.
 
 2. **Route (deterministic, no model).** Each thesis has a subscription derived from `sources`: entity IDs and form types. An evidence item is routed to every active, watching thesis whose subscription it matches.
 
@@ -36,14 +37,14 @@ Every step from `impact` onward runs with a fixed `clock` (see *Point-in-time*).
 
 3. **Batch.** Items routed to a thesis within `policy.debounce_s` of the first unprocessed item are batched into one evaluation job. Resolution-class evidence (template-defined, for example an acquisition announcement or a candidate's SC 13D crossing the stake threshold) skips the debounce.
 
-   **Heartbeat.** A template can declare a heartbeat (RFC-008: every 30 days by default). If no evaluation has run for that long, the scheduler creates an evaluation job with `trigger: heartbeat` and no new evidence, so time-sensitive quantities are re-estimated as the horizon runs down.
+   **Scheduled re-estimate.** A template can declare a re-estimate cadence (RFC-008: every 30 days by default). If no evaluation has run for that long, the scheduler creates an evaluation job with `trigger: scheduled` and no new evidence, so time-sensitive quantities are re-estimated as the horizon runs down.
 
    > Trade-off: debouncing merges an S-1 and its same-day exhibits into one evaluation, which cuts cost and duplicate versions. The price is up to `debounce_s` of added latency.
 
 4. **Fix the clock.** The job's `clock` is set when the job is created and never changes afterward:
    - live: `clock = max(as_of of batch)`. That is always ≤ wall time at job creation, and the job still sees every earlier evidence item;
-   - heartbeat: `clock` = the scheduled heartbeat time;
-   - replay (RFC-007): `clock` = the as_of of the replay event, or the virtual heartbeat time.
+   - scheduled: `clock` = the scheduled time;
+   - replay (RFC-007): `clock` = the as_of of the replay event, or the virtual scheduled time.
 
    Evidence that arrives after job creation waits for the next job. Because of this, every live evaluation can later be re-run in replay with the same `clock` and `evidence_set`.
 
@@ -72,7 +73,7 @@ Every step from `impact` onward runs with a fixed `clock` (see *Point-in-time*).
    | Each candidate's stake probability ≥ its acquisition probability; resolved stakes are 1 | code |
    | `expected_announcement_date` is in `[clock, horizon.end]` | code |
    | Every equity and debt relationship and every resolved stake has a structure tag, and commercial tags link to the relationship that justifies them | code |
-   | Every changed quantity has ≥ 1 claim with a citation | code |
+   | Every changed quantity has ≥ 1 claim with a citation. For a `scheduled` evaluation, which has no new evidence, the change must instead carry a `computed` claim for the elapsed time (days since the head, days left in the horizon) plus the citations the head already relied on | code |
    | Every cited `as_of ≤ clock` | code |
    | Relationship statuses agree with the rationale behind each candidate's probability (for example a `terminated` contract still treated as active), and the estimator's own narrative agrees with its numbers | estimator model, one self-review pass |
 
@@ -85,7 +86,7 @@ Every step from `impact` onward runs with a fixed `clock` (see *Point-in-time*).
    > Trade-off: several self-checks duplicate deterministic audit checks. We keep both because the self-check runs before the auditor, is cheap, and lets the estimator fix its own mistakes in context. The auditor stays an independent second line. RFC-007 measures each line's catch rate separately.
 
 9. **Audit (auditor role + deterministic checks).** See RFC-006. Summary:
-   - deterministic: every cited evidence ID is in `evidence_set`, and every `as_of ≤ clock`;
+   - deterministic: every cited evidence ID is in `evidence_set`, every `as_of ≤ clock`, and any changed quantity supported only by secondary evidence is flagged `secondary_only` (which fails the audit; RFC-008 *Rumor handling*);
    - model: does each cited span support its claim, and is each claim's `extracted` / `inferred` label correct.
    If a citation fails, the estimator gets **one** repair attempt. Claims that are still unsupported afterward are kept, marked `unsupported`, and block approval without an override.
 
@@ -146,7 +147,7 @@ Tool and extraction failures are retried or routed to an alternate path, and eve
 - Every evaluation job carries `clock`. Every read of the evidence store takes `clock` and filters on `as_of ≤ clock`.
 - Derived artifacts (extractions, EvidenceMatrix rows) inherit `as_of = max(as_of of inputs)`.
 - Before any model call, the context builder asserts that every evidence item in the prompt context has `as_of ≤ clock`. If one doesn't, that is a **hard error**: the job fails with `point_in_time_violation`, no version or record is committed, and the event is counted in telemetry and in RFC-007. It is not a warning, and it is not retried with the item dropped.
-- Evidence without a reliable `as_of` cannot be used. EDGAR `as_of` is the acceptance datetime. A press release's `as_of` is the wire or dateline timestamp, and a date-only timestamp is pinned to 23:59:59 in the publisher's timezone, which is the later, safer choice. For a web item with no publication date, `as_of = retrieved_at` in live mode. Such an item is therefore invisible to any replay clock earlier than retrieval.
+- Evidence without a reliable `as_of` cannot be used. EDGAR `as_of` is the acceptance datetime. A press release's `as_of` is the wire or dateline timestamp, and a date-only timestamp is pinned to 23:59:59 in the publisher's timezone, which is the later, safer choice. A named-outlet news item's `as_of` is its stated publication time in live mode; in replay corpora it is the later of that and its first web-archive capture (RFC-007 §1.4). For a web item with no publication date, `as_of = retrieved_at` in live mode. Such an item is therefore invisible to any replay clock earlier than retrieval.
 
 > Trade-off: the filter should make the assertion redundant, and it's there anyway. It catches bugs like a cached extraction from a later amendment or a join that forgot the clock. Failing hard costs availability, but a version that silently used future evidence would be worse than no version, because nothing downstream could detect it.
 
@@ -160,18 +161,21 @@ Tool and extraction failures are retried or routed to an alternate path, and eve
 
 ### Budget and latency
 
-`budget_usd_per_evaluation` and `max_latency_s` are enforced. Under pressure, the planner degrades in a fixed order and logs what it dropped in the ReviewPacket:
+`budget_usd_per_evaluation` and `max_latency_s` are enforced. Under pressure, the planner degrades in a fixed order that the **template** defines, and logs what it dropped in the ReviewPacket. For `neocloud_deal` (RFC-008):
 
-1. drop secondary-tier evidence;
+1. drop `low`-reliability secondary evidence (open-web results, unlisted outlets);
 2. skip re-estimating quantities that are marked affected only through dependency edges;
-3. hold the job (`failed: budget_exceeded`).
+3. drop `normal`-reliability news, but never an item behind a `talks:*` signal the head relies on;
+4. hold the job (`failed: budget_exceeded`).
+
+`high`-reliability news is never dropped, because for private neoclouds it is often the only evidence of reported talks or financing.
 
 It never skips the audit.
 
-> Trade-off: fixing the degrade order makes cost overruns predictable and visible to reviewers. It rules out smarter per-case trade-offs a planner could make on its own.
+> Trade-off: fixing the degrade order per template makes cost overruns predictable and visible to reviewers. It rules out smarter per-case trade-offs a planner could make on its own. Keeping trusted news over dependency-only re-estimates reflects where the signal is for private targets.
 
 ## Open questions
 
 - The log-odds threshold's `logit_abs` and `prob_abs_min` interact. Should the floor scale with the base rate instead of being a constant?
-- Should a heartbeat also fire on a schedule relative to the horizon end (for example 30 days before), not only after 30 idle days?
+- Should a scheduled re-estimate also fire relative to the horizon end (for example 30 days before), not only after 30 idle days?
 - Debounce and resolution latency: is skipping the debounce for resolution-class evidence enough, or do some events (a strategic-review announcement, credible reported talks) need to skip it too?

@@ -26,7 +26,7 @@
         "degradations": {
           "type": "array",
           "description": "What budget pressure dropped (RFC-005).",
-          "items": { "enum": ["secondary_evidence_dropped", "dependency_only_quantities_skipped"] }
+          "items": { "enum": ["low_reliability_secondary_dropped", "dependency_only_quantities_skipped", "normal_reliability_news_dropped"] }
         }
       }
     },
@@ -206,7 +206,7 @@
         },
         "repair_attempted": { "type": "boolean" },
         "spot_check_selected": { "type": "boolean", "description": "Selected for human citation spot-check (RFC-007 §4)." },
-        "override_reason": { "type": "string", "description": "Required when approving with audit_status failed; then audit_status reads overridden." }
+        "override_reason": { "type": "string", "description": "Required when approving with audit_status failed; then audit_status reads overridden. The value replay_auto is reserved for replay auto-approval of rumor-only audit failures (RFC-004)." }
       }
     }
   },

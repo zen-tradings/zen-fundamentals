@@ -254,7 +254,7 @@
         "prior_gap_flag": { "type": "number", "exclusiveMinimum": 1, "description": "Odds ratio between agent and reference prior on p_acquired above which an investor judgment item is raised (RFC-008)." },
         "stake_min_pct": { "type": "number", "exclusiveMinimum": 0, "maximum": 1, "default": 0.05 },
         "stake_min_usd": { "type": "number", "exclusiveMinimum": 0, "default": 1000000000 },
-        "heartbeat_days": { "type": "integer", "minimum": 1, "default": 30 },
+        "reestimate_days": { "type": "integer", "minimum": 1, "default": 30 },
         "budget_usd_per_evaluation": { "type": "number", "exclusiveMinimum": 0 },
         "max_latency_s": { "type": "integer", "minimum": 1 },
         "min_primary_sources": { "type": "integer", "minimum": 0, "default": 1 },

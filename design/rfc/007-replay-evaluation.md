@@ -100,19 +100,19 @@ The replay feeds a **frozen corpus**, never live sources: every `timeline`, `pre
 
 ### 2.1 Procedure (per case × configuration × repeat)
 
-1. Create a thesis from the case record (`subject` with the manifest candidates and `horizon = window`, `template: neocloud_deal@<pinned>`, `sources` pointing at the frozen corpus, `review: auto`).
-2. Build the event stream: corpus documents with `as_of` in the window, sorted by `(as_of, id)`. Documents with identical `as_of` form one event. Add heartbeat events at the template cadence **in virtual time**, skipping any heartbeat within `heartbeat_days` of a real evaluation (RFC-008).
+1. Create a thesis from the case record (`subject` with the manifest candidates and `horizon = window`, `template: neocloud_deal@<pinned>`, `sources` pointing at the frozen corpus, `review: auto`). Auto-approval follows RFC-004: rumor-only audit failures are approved as `replay_auto` overrides; any other audit failure leaves the head unchanged.
+2. Build the event stream: corpus documents with `as_of` in the window, sorted by `(as_of, id)`. Documents with identical `as_of` form one event. Add scheduled re-estimate events at the template cadence **in virtual time**, skipping any within `reestimate_days` of a real evaluation (RFC-008).
 3. Set `clock = window.start`. Run the initial evaluation (`trigger: initial`) with everything with `as_of ≤ clock` visible, including the one-year lookback.
 4. For each subsequent event: advance `clock` to the event's `as_of`, apply the production debounce in virtual time, and run the evaluation job exactly as in production (RFC-005).
 5. Stake events are partial resolutions: the replay keeps running.
 6. Stop after the event that contains the acquisition evidence, or at `window.end`. Evaluations at or after the resolving event are recorded but **not scored**.
 7. Record every ThesisVersion, EvaluationRecord, ReviewPacket, and telemetry row.
 
-> Trade-off: applying debounce and heartbeats in virtual time makes replay faithful to production batching and decay, but it produces fewer checkpoints than scoring every single document. We score what production would have produced.
+> Trade-off: applying debounce and scheduled re-estimates in virtual time makes replay faithful to production batching and decay, but it produces fewer checkpoints than scoring every single document. We score what production would have produced.
 
 ### 2.2 What is scored at a checkpoint
 
-A **checkpoint** is the initial evaluation plus every subsequent event and heartbeat before resolution.
+A **checkpoint** is the initial evaluation plus every subsequent event and scheduled re-estimate before resolution.
 
 - **Primary:** the head, i.e. the latest auto-approved ThesisVersion at that clock. This is what a user would have relied on.
 - **Secondary:** the latest *proposed* values, including those in `below_threshold` EvaluationRecords. The gap between primary and secondary shows how much accuracy the material-change gate trades for less review load.
@@ -261,9 +261,9 @@ Pooled over every candidate probability (acquisition and stake) at every checkpo
 | **Δ vs reference prior** | Paired difference in acquirer log loss and stake Brier, agent minus B1, on the same checkpoints |
 | **Citation precision** | Share of ReviewPacket claims whose cited evidence supports them. Measured two ways: (a) an **eval judge** on all claims. This is a separate configuration from the pipeline auditor, so the pipeline never grades itself. (b) Humans on a stratified random sample, **target:** ≥ 150 claims per headline configuration, stratified by provenance and tier. Judge–human agreement (Cohen's κ) is reported so readers can see how far to trust (a). |
 | **PIT violations** | Count across the three layers plus canaries. Must be **0**. Any violation invalidates the run. |
-| **Cost per version / per evaluation** | USD from content-free telemetry and the pinned price table. p50, p90. Heartbeat evaluations reported separately. |
+| **Cost per version / per evaluation** | USD from content-free telemetry and the pinned price table. p50, p90. Scheduled evaluations reported separately. |
 | **Latency per version** | Evaluation job start → commit, wall clock. p50, p90. |
-| **Review load** | Versions per case, versions per case-month, and overrides per case (rumor-driven approvals, RFC-008) |
+| **Review load** | Versions per case, versions per case-month, and overrides per case (`replay_auto` rumor approvals, RFC-004; each would be a human decision live). Versions left unapproved because of other audit failures are counted separately. |
 
 **Provider-candidate split.** Every row is also reported split by whether any role's provider is a named candidate in the manifest (RFC-008 *Conflict of interest*), for the probabilities involving that candidate.
 
