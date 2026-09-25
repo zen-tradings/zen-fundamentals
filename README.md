@@ -128,7 +128,7 @@ Streaming via SSE on `/run` for progressive steps (impact, extraction, estimate,
 
 ## Design
 
-Ranked by priority: first what makes the agent auditable and reproducible, then the core product behavior, then the execution infrastructure it runs on.
+Ordered by priority: auditability and reproducibility (1–4), then core behavior (5–11), then execution infrastructure (12–17).
 
 1. **Point-in-time evidence.** Every evidence item carries `as_of` (publication or filing time). Every estimation step runs with a `clock`. Evidence with `as_of > clock` in a model's context is a **hard error**, not a warning. *Trade-off: failing hard costs availability, but a version that silently used future evidence would be undetectable downstream.*
 2. **Replay evaluation.** Historical cases are replayed in `as_of` order with a moving clock ([RFC-007](design/rfc/007-replay-evaluation.md)).
@@ -142,25 +142,25 @@ Ranked by priority: first what makes the agent auditable and reproducible, then 
    - each claim labeled `extracted`, `computed`, or `inferred` (with model and role).
 
    Template-defined sections (distribution, map, scenario, and list tables) show why a headline moved, next to the comparison baseline. A failed audit blocks approval unless someone overrides it with a reason. Templates can opt in to failing any change supported only by news or rumor, so a human always signs off on it. `neocloud_deal` does ([RFC-006](design/rfc/006-review-packet.md)).
-4. **Thesis, not content; templates as plug-ins.** The core object is a thesis with tracked quantities. The output is an immutable ThesisVersion with deltas, evidence, and a ReviewPacket ([RFC-004](design/rfc/004-thesis-and-thesis-version.md)).
+4. **Shared evidence, per-thesis judgment.** One filing is fetched, normalized, and extracted once, and cited by many theses, even across templates. For example, a hyperscaler's 10-K that names several GPU-cloud suppliers serves every thesis on those neoclouds. Judgment (impact, estimates, versions) is per-thesis and reads evidence only through a point-in-time view ([RFC-001](design/rfc/001-evidence-judgment-separation.md)).
+5. **Thesis, not content; templates as plug-ins.** The core object is a thesis with tracked quantities. The output is an immutable ThesisVersion with deltas, evidence, and a ReviewPacket ([RFC-004](design/rfc/004-thesis-and-thesis-version.md)).
    - **The core provides** the quantity types (distributions, per-party probability maps, scenario sets, dates, condition/relationship/signal lists, facts), the gate, the review packet, and the replay harness.
    - **Each template supplies** everything specific to its deal type (see *Templates*, [RFC-009](design/rfc/009-template-contract.md)).
 
    *Trade-off: central templates give up per-user flexibility so that one replay evaluation covers every thesis of a template.*
-5. **Re-evaluation loop with a material-change gate.** New evidence (or a scheduled re-estimate, so time-sensitive estimates decay) → which quantities does it affect? → extract → re-estimate → self-check → audit. If any change exceeds `policy.material_change` against the approved head, a new version goes to `needs_review`. Otherwise the evidence and the no-change decision are recorded without notifying anyone. Thresholds are per quantity type, either absolute or log-odds with a floor. `neocloud_deal` uses log-odds because base rates are low ([RFC-005](design/rfc/005-reevaluation-loop-and-material-change-gate.md)). *Trade-off: comparing against the approved head (not the last evaluation) lets slow drift accumulate until it crosses the threshold, at the cost of occasionally paging on a change no single filing caused.*
-6. **Self-check and recovery.** The estimator runs an explicit self-check before emitting, and records the result.
+6. **Re-evaluation loop with a material-change gate.** New evidence (or a scheduled re-estimate, so time-sensitive estimates decay) → which quantities does it affect? → extract → re-estimate → self-check → audit. If any change exceeds `policy.material_change` against the approved head, a new version goes to `needs_review`. Otherwise the evidence and the no-change decision are recorded without notifying anyone. Thresholds are per quantity type, either absolute or log-odds with a floor. `neocloud_deal` uses log-odds because base rates are low ([RFC-005](design/rfc/005-reevaluation-loop-and-material-change-gate.md)). *Trade-off: comparing against the approved head (not the last evaluation) lets slow drift accumulate until it crosses the threshold, at the cost of occasionally paging on a change no single filing caused.*
+7. **Self-check and recovery.** The estimator runs an explicit self-check before emitting, and records the result.
    - **Core checks:** type invariants such as distributions summing to 1, derived values matching their source, every change cited, and every `as_of ≤ clock`. A scheduled re-estimate cites the elapsed time instead of new evidence.
    - **Template checks.** Example (`neocloud_deal`): each candidate's stake probability is at least its acquisition probability, and commercial structure tags link to the contract behind them.
 
    Tool and extraction failures are retried or routed to alternate paths, and every recovery is recorded.
-7. **Role-based model routing.** The planner and estimator use the strongest available model. The extractor uses a low-cost model. The auditor uses a low-cost model **from a different provider than the estimator**, so the two don't share failure modes; this is enforced fail-closed. Reasoning and output token budgets are separate. When a model provider is also a party in the subject (in `neocloud_deal`, some candidates are), the version flags the conflict and replay results are split by it. *Trade-off: provider diversity buys independent errors at the cost of a weaker judge, so the auditor only answers narrow, checkable questions.*
-8. **Safeguards & permissions.**
+8. **Role-based model routing.** The planner and estimator use the strongest available model. The extractor uses a low-cost model. The auditor uses a low-cost model **from a different provider than the estimator**, so the two don't share failure modes; this is enforced fail-closed. Reasoning and output token budgets are separate. When a model provider is also a party in the subject (in `neocloud_deal`, some candidates are), the version flags the conflict and replay results are split by it. *Trade-off: provider diversity buys independent errors at the cost of a weaker judge, so the auditor only answers narrow, checkable questions.*
+9. **Safeguards & permissions.**
    - Public or licensed sources only, with no path for material non-public information.
    - Scoped API keys.
    - Per-lane tool allowlists (the estimator has no fetch tools).
    - Review required by default (`review: auto` is replay-only).
    - Fail-closed gates, held and never silently degraded.
-9. **Shared evidence, per-thesis judgment.** One filing is fetched, normalized, and extracted once, and cited by many theses, even across templates. For example, a hyperscaler's 10-K that names several GPU-cloud suppliers serves every thesis on those neoclouds. Judgment (impact, estimates, versions) is per-thesis and reads evidence only through a point-in-time view ([RFC-001](design/rfc/001-evidence-judgment-separation.md)).
 10. **Structured feedback.** `user_rating`, `outcome_audit` (scored with the template's replay metrics, and promotable into its replay dataset), and `tool_execution_quality`.
 11. **Context engineering.** `TaskContract → SearchPlan → EvidenceMatrix`: the estimator sees ranked, deduplicated, quota-limited, point-in-time evidence, never raw results. Long runs compact instead of growing.
 12. **Durable execution & lifecycle.** Separate lifecycles for evidence ingest, evaluation, version review, delivery, and replay ([RFC-002](design/rfc/002-job-lifecycle-state-machine.md)), leased workers with fencing tokens ([RFC-003](design/rfc/003-fencing-token-for-job-execution.md)), and an idempotent outbox.
