@@ -139,6 +139,7 @@ Early design. RFCs in [`design/rfc/`](design/rfc/):
 - [006](design/rfc/006-review-packet.md): ReviewPacket
 - [007](design/rfc/007-replay-evaluation.md): replay evaluation
 - [008](design/rfc/008-neocloud-deal-template.md): `neocloud_deal` template, outcome definitions, stake structure tags, rumor handling, reference prior
+- [009](design/rfc/009-template-contract.md): template contract: what a template provides, core quantity types, two-stage validation, chaining
 
 Schemas in [`design/schemas/`](design/schemas/): [Thesis](design/schemas/thesis.schema.json), [ThesisVersion](design/schemas/thesis-version.schema.json), [EvidenceItem](design/schemas/evidence-item.schema.json), [ReviewPacket](design/schemas/review-packet.schema.json), [eval results row](design/schemas/eval-result-row.schema.json).
 

@@ -1,0 +1,250 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://raw.githubusercontent.com/zen-tradings/zen-fundamentals/main/design/schemas/core/quantity-types.schema.json",
+  "title": "Core quantity types",
+  "description": "Template-agnostic building blocks (RFC-009). Every template quantity uses one of these types. Keys, vocabularies, outcome names, and facts shapes are supplied by the template and checked in stage-two validation.",
+  "$defs": {
+    "EvidenceId": { "type": "string", "pattern": "^ev_[a-z0-9]{16,64}$" },
+    "Key": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9_]{0,31}$",
+      "description": "Slug for a party or outcome. The template defines which keys are valid (for example subject parties plus reserved keys)."
+    },
+    "VocabKey": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9_]*(:[a-z0-9_-]+)*$",
+      "description": "Canonical prefix:slug key from a template vocabulary, e.g. regulatory:hsr or equity:nvidia."
+    },
+    "Probability": { "type": "number", "minimum": 0, "maximum": 1 },
+    "Money": {
+      "type": "object",
+      "required": ["amount", "currency"],
+      "additionalProperties": false,
+      "properties": {
+        "amount": { "type": "number", "minimum": 0 },
+        "currency": { "type": "string", "pattern": "^[A-Z]{3}$" }
+      }
+    },
+    "Labels": {
+      "type": "object",
+      "description": "Descriptive labels, one value per template label set (RFC-009). Labels never decide whether an outcome happened.",
+      "propertyNames": { "pattern": "^[a-z][a-z0-9_]{0,31}$" },
+      "additionalProperties": { "type": "string" }
+    },
+    "LabelFlags": {
+      "type": "object",
+      "description": "Every label value that applies, per label set, when more than one does.",
+      "propertyNames": { "pattern": "^[a-z][a-z0-9_]{0,31}$" },
+      "additionalProperties": { "type": "array", "items": { "type": "string" }, "uniqueItems": true }
+    },
+
+    "probability": { "$ref": "#/$defs/Probability" },
+
+    "derived_probability": {
+      "type": "object",
+      "required": ["value", "derived_from", "formula"],
+      "additionalProperties": false,
+      "properties": {
+        "value": { "$ref": "#/$defs/Probability" },
+        "derived_from": { "type": "string", "description": "Source quantity name." },
+        "formula": { "type": "string", "description": "As declared in the template manifest." }
+      }
+    },
+
+    "outcome_distribution": {
+      "type": "array",
+      "description": "One entry per valid key; probabilities sum to 1 within 1e-6 (core self-check). Valid keys come from the template.",
+      "minItems": 2,
+      "items": {
+        "type": "object",
+        "required": ["key", "probability"],
+        "additionalProperties": false,
+        "properties": {
+          "key": { "$ref": "#/$defs/Key" },
+          "probability": { "$ref": "#/$defs/Probability" },
+          "rationale": { "type": "string" }
+        }
+      }
+    },
+
+    "probability_map": {
+      "type": "array",
+      "description": "One independent probability per key. A resolved entry has probability 1 (or 0 if the template resolves it negatively), computed by code.",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "required": ["key", "probability", "resolved"],
+        "additionalProperties": false,
+        "properties": {
+          "key": { "$ref": "#/$defs/Key" },
+          "probability": { "$ref": "#/$defs/Probability" },
+          "resolved": { "type": "boolean" },
+          "resolved_by": { "type": "array", "items": { "$ref": "#/$defs/EvidenceId" } },
+          "labels": { "$ref": "#/$defs/Labels" },
+          "label_flags": { "$ref": "#/$defs/LabelFlags" },
+          "rationale": { "type": "string" }
+        },
+        "allOf": [
+          {
+            "if": { "properties": { "resolved": { "const": true } } },
+            "then": { "required": ["resolved_by"], "properties": { "probability": { "enum": [0, 1] } } }
+          }
+        ]
+      }
+    },
+
+    "scenario_set": {
+      "type": "array",
+      "description": "One entry per template outcome, with a value under that outcome (for example a per-share price). Probabilities sum to 1 within 1e-6 (core self-check).",
+      "minItems": 2,
+      "items": {
+        "type": "object",
+        "required": ["outcome", "probability"],
+        "additionalProperties": false,
+        "properties": {
+          "outcome": { "$ref": "#/$defs/Key" },
+          "probability": { "$ref": "#/$defs/Probability" },
+          "value": { "$ref": "#/$defs/Money" },
+          "value_rationale": { "type": "string" }
+        }
+      }
+    },
+
+    "date_estimate": {
+      "type": "object",
+      "required": ["date"],
+      "additionalProperties": false,
+      "properties": {
+        "date": { "type": "string", "format": "date" },
+        "interval_80": {
+          "type": "object",
+          "required": ["low", "high"],
+          "additionalProperties": false,
+          "properties": {
+            "low": { "type": "string", "format": "date" },
+            "high": { "type": "string", "format": "date" }
+          }
+        },
+        "conditional_on": { "type": "string", "description": "Condition declared by the template, e.g. completion or acquisition_in_horizon." }
+      }
+    },
+
+    "condition_list": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["key", "type", "description", "status"],
+        "additionalProperties": false,
+        "properties": {
+          "key": { "$ref": "#/$defs/VocabKey" },
+          "type": { "type": "string", "description": "From the template vocabulary." },
+          "description": { "type": "string" },
+          "status": { "enum": ["pending", "satisfied", "waived", "failed", "not_applicable"] },
+          "expected_by": { "type": "string", "format": "date" }
+        }
+      }
+    },
+
+    "relationship_list": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["key", "party", "type", "role", "status", "first_disclosed_as_of"],
+        "additionalProperties": false,
+        "properties": {
+          "key": { "$ref": "#/$defs/VocabKey" },
+          "party": { "$ref": "#/$defs/Key" },
+          "type": { "type": "string", "description": "From the template vocabulary." },
+          "role": { "type": "string", "description": "The party's role toward the subject, from the template vocabulary." },
+          "status": { "enum": ["announced", "active", "expired", "terminated"] },
+          "value": { "$ref": "#/$defs/Money" },
+          "term_years": { "type": "number", "exclusiveMinimum": 0 },
+          "ownership_pct": { "type": "number", "minimum": 0, "maximum": 1 },
+          "labels": { "$ref": "#/$defs/Labels" },
+          "label_flags": { "$ref": "#/$defs/LabelFlags" },
+          "linked": { "type": "array", "items": { "$ref": "#/$defs/VocabKey" }, "uniqueItems": true, "description": "Other relationship keys that justify a label." },
+          "first_disclosed_as_of": { "type": "string", "format": "date-time" }
+        }
+      }
+    },
+
+    "signal_list": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["key", "description", "status", "direction", "basis"],
+        "additionalProperties": false,
+        "properties": {
+          "key": { "$ref": "#/$defs/VocabKey" },
+          "description": { "type": "string" },
+          "status": { "enum": ["present", "resolved", "contradicted"] },
+          "direction": { "enum": ["raises", "lowers", "ambiguous"] },
+          "parties": { "type": "array", "items": { "$ref": "#/$defs/Key" }, "uniqueItems": true },
+          "basis": { "enum": ["primary", "secondary_only"] }
+        }
+      }
+    },
+
+    "facts": {
+      "type": "object",
+      "description": "Template-shaped object. Top-level properties are the field groups that material-change rules refer to."
+    },
+
+    "Rules": {
+      "description": "Material-change rule shapes per quantity type (RFC-005). Templates set defaults; theses override within the same shape.",
+      "$defs": {
+        "probability": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "abs": { "type": "number", "exclusiveMinimum": 0, "maximum": 1 },
+            "logit_abs": { "type": "number", "exclusiveMinimum": 0 },
+            "prob_abs_min": { "type": "number", "minimum": 0, "maximum": 1 }
+          }
+        },
+        "outcome_distribution": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "abs": { "type": "number", "exclusiveMinimum": 0, "maximum": 1 },
+            "logit_abs": { "type": "number", "exclusiveMinimum": 0 },
+            "prob_abs_min": { "type": "number", "minimum": 0, "maximum": 1 },
+            "on_top_rank_change": { "type": "boolean" }
+          }
+        },
+        "scenario_set": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "prob_abs": { "type": "number", "exclusiveMinimum": 0, "maximum": 1 },
+            "value_rel": { "type": "number", "exclusiveMinimum": 0 }
+          }
+        },
+        "date_estimate": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": { "days": { "type": "integer", "minimum": 1 } }
+        },
+        "list": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "on": { "type": "array", "minItems": 1, "items": { "enum": ["added", "removed", "status_changed", "value_changed", "label_changed"] } }
+          }
+        },
+        "facts": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "on": {
+              "oneOf": [
+                { "const": "any" },
+                { "type": "array", "minItems": 1, "items": { "type": "string" } }
+              ]
+            }
+          }
+        }
+      }
+    }
+  }
+}
