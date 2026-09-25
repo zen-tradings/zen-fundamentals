@@ -6,7 +6,7 @@ The first template is **neocloud deal watch**. Pick a neocloud (a GPU-cloud or A
 
 Auditable, reproducible, model-agnostic.
 
-> **Status: design only.** Nothing below is implemented yet. Everything is **planned** unless marked otherwise. Specs live in [`design/rfc/`](design/rfc/) and [`design/schemas/`](design/schemas/).
+> **Status: design only.** Nothing below is implemented yet. Everything is **planned** unless marked otherwise. Rationale lives in [`design/rfc/`](design/rfc/), deal-agnostic schemas in [`design/schemas/core/`](design/schemas/core/), and deal-type templates in [`design/templates/`](design/templates/).
 
 ## What it does
 
@@ -18,7 +18,7 @@ sources ──▶ evidence layer ──▶ re-evaluation loop ──────
  web)
 ```
 
-A **thesis** is a declarative spec, not a workflow. It has a subject, a template, tracked quantities, sources, and a policy:
+A **thesis** is a declarative spec, not a workflow. It has a subject, a template, tracked quantities, sources, and a policy. This one uses `neocloud_deal` (full, validated file: [`who-buys-gridcompute.yaml`](design/templates/neocloud_deal/examples/who-buys-gridcompute.yaml)):
 
 ```yaml
 thesis: who-buys-gridcompute
@@ -58,7 +58,7 @@ Every material update produces an immutable **ThesisVersion** containing:
 - the new value of each tracked quantity: `acquirer_distribution` (who signs the first acquisition: each candidate, `other`, or `none`) → derived `p_acquired`; `stake_probabilities` (per candidate, a stake of ≥ 5% or ≥ US$1bn); `expected_announcement_date`; `relationships`; `signals`; `target_facts`. Every stake and equity or debt tie carries a **structure tag** (`vendor_financing`, `capacity_backstop`, `customer_equity_kicker`, `pure_equity`, `undetermined`), because much of the equity in this sector is a way to sell GPUs or lock in capacity rather than a strategic bet. Tags describe the deal but never decide whether a stake counted;
 - the delta from the last approved version;
 - the evidence behind each change;
-- a rule-based reference prior ("the biggest customer or investor is the likeliest buyer") for comparison;
+- the template's comparison baseline, here a rule-based reference prior ("the biggest customer or investor is the likeliest buyer");
 - the estimator's self-check and any failure recoveries;
 - a **ReviewPacket** that separates what was *read* from evidence from what a model *inferred* (and which model, in which role), and lists items flagged as uncertain or recommended for investor judgment.
 
@@ -75,7 +75,7 @@ POST   /v1/theses/:id/watch             start / stop the continuous loop
 GET    /v1/theses/:id/versions          version history (seq, clock, material changes, review state)
 GET    /v1/theses/:id/evaluations       evaluation records, including no-change decisions
 POST   /v1/theses/:id/feedback          outcome_audit on resolution
-GET    /v1/versions/:id                 values, deltas, evidence set, reference prior, self-check, trace, cost
+GET    /v1/versions/:id                 values, deltas, evidence set, comparison baseline, self-check, trace, cost
 GET    /v1/versions/:id/review-packet   ReviewPacket (JSON, or ?format=md)
 POST   /v1/versions/:id/approve         approve a needs_review version → becomes head; fires webhook via outbox
 POST   /v1/versions/:id/reject          reject with reason; head unchanged
@@ -85,7 +85,9 @@ POST   /v1/evaluations/:id/answer       resolve a needs_input question
 GET    /v1/evidence/:id                 shared evidence item (source, tier, as_of, hash)
 POST   /v1/evals/replay                 start a replay evaluation run (RFC-007)
 GET    /v1/evals/:id                    results table + exclusions
-GET    /v1/templates  ·  /v1/connectors  ·  /v1/skills
+GET    /v1/templates                    installed templates (id, version, quantities, sources_allowed)
+GET    /v1/templates/:id                template manifest and schemas
+GET    /v1/connectors  ·  /v1/skills
 ```
 
 Streaming via SSE on `/run` for progressive steps (impact, extraction, estimate, audit). An OpenAPI spec is planned at `design/openapi.yaml`. Payloads follow [`design/schemas/`](design/schemas/).
@@ -120,7 +122,7 @@ Planned. There is no runnable code yet.
 git clone https://github.com/zen-tradings/zen-fundamentals
 cd zen-fundamentals && cp .env.example .env
 docker compose up          # api + worker + postgres
-curl -X POST localhost:8080/v1/theses -d @examples/who-buys-gridcompute.yaml
+curl -X POST localhost:8080/v1/theses -d @design/templates/neocloud_deal/examples/who-buys-gridcompute.yaml
 ```
 
 ## Reference
@@ -147,7 +149,7 @@ Templates in [`design/templates/`](design/templates/): [`neocloud_deal`](design/
 
 `python3 design/check.py` (needs PyYAML and jsonschema) validates every schema and `$ref`, checks each template manifest against the core contract, validates example theses in two stages, confirms the core stays template-agnostic, and checks links.
 
-Planned: OpenAPI spec, model capability profiles, replay dataset manifest and annotation guide, reference implementation.
+Planned: OpenAPI spec, model capability profiles, replay dataset manifest and annotation guide, reference implementation, and more templates (promoting the `merger_arb` sketch would let an announced neocloud deal hand off to a thesis that tracks whether it closes).
 
 ## Open questions
 
