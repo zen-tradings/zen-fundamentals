@@ -6,7 +6,8 @@ Checks:
   2. Each template manifest is consistent: quantity types exist in the core library, values_schema
      composes core types matching the manifest, and every quantity named in packet_layout,
      thresholds, dependencies, impact_rules, and scheduled_reestimate exists. Threshold rules use
-     the core rule shape for the quantity's type. Outcomes have resolution evidence.
+     the core rule shape for the quantity's type. Outcomes have resolution evidence. eval.scores uses
+     RFC-007 registry families valid for each type. YAML blocks in the rationale RFC match the manifest.
   3. Example theses validate in two stages (core thesis schema, then template subject/params).
   4. Core stays template-agnostic: no template id or template-specific term in schemas/core/, and
      in RFC-001..007 only inside labeled examples ("Example (`<id>`)").
@@ -115,6 +116,18 @@ RULE_SHAPE = {
 SECTION_KINDS = {"distribution_table": "outcome_distribution", "map_table": "probability_map",
                  "scenario_table": "scenario_set", "list_changes": None, "date_change": "date_estimate",
                  "facts_changes": "facts"}
+METRIC_FAMILIES = {  # RFC-007 §4.1
+    "probability": {"brier", "bss", "log_loss", "calibration"},
+    "derived_probability": {"brier", "bss", "log_loss", "calibration"},
+    "outcome_distribution": {"multiclass_log_loss", "multiclass_brier", "rank_topk", "lead_time", "calibration"},
+    "probability_map": {"brier", "bss", "log_loss", "rank_topk", "lead_time", "calibration"},
+    "scenario_set": {"multiclass_brier", "value_error"},
+    "date_estimate": {"abs_error", "bias"},
+    "condition_list": {"recall_precision", "status_accuracy", "label_accuracy"},
+    "relationship_list": {"recall_precision", "status_accuracy", "label_accuracy"},
+    "signal_list": set(),
+    "facts": {"field_accuracy"},
+}
 template_ids = []
 
 for manifest_path in sorted(glob.glob(os.path.join(TEMPLATES, "*", "template.yaml"))):
@@ -203,6 +216,39 @@ for manifest_path in sorted(glob.glob(os.path.join(TEMPLATES, "*", "template.yam
                 err(f"{where}: list_changes bound to non-list quantity {q}")
             for d in item.get("derived", []):
                 need(d, "packet_layout.derived")
+
+    # RFC-009 conformance rule 5: eval.scores uses registry families valid for each type (RFC-007 §4.1)
+    scores = ev.get("scores") or {}
+    if not scores:
+        err(f"{where}: eval.scores is missing or empty")
+    for q, families in scores.items():
+        need(q, "eval.scores")
+        t = quantities.get(q, {}).get("type")
+        allowed = METRIC_FAMILIES.get(t, set()) | ({"vs_baseline"} if q in (m.get("baseline") or {}).get("values", []) else set())
+        for fam in families:
+            if fam not in allowed:
+                err(f"{where}: eval.scores.{q} uses '{fam}', not a registry family for {t}")
+
+    # Rationale RFC must not drift: YAML blocks that restate manifest keys must match the manifest
+    if m.get("rationale"):
+        rpath = os.path.normpath(os.path.join(tdir, m["rationale"]))
+        if not os.path.exists(rpath):
+            err(f"{where}: rationale file missing")
+        else:
+            for block in re.findall(r"```yaml\n(.*?)```", open(rpath).read(), re.S):
+                try:
+                    y = yaml.safe_load(block)
+                except yaml.YAMLError:
+                    continue
+                if not isinstance(y, dict):
+                    continue
+                for k, v in y.items():
+                    if k in ("thresholds", "params", "routing", "scheduled_reestimate") and k in m:
+                        mv = m[k]
+                        if isinstance(mv, dict) and isinstance(v, dict):
+                            mv = {kk: vv for kk, vv in mv.items() if kk in v}
+                        if v != mv:
+                            err(f"{rel(rpath)}: YAML block '{k}' differs from {where}")
 
     outcomes = m.get("outcomes") or {}
     for name, o in outcomes.items():

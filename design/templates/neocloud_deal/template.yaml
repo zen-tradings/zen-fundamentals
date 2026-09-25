@@ -147,6 +147,12 @@ extraction_targets:
 eval:
   spec: eval.md
   metrics_schema: eval-metrics.schema.json
+  scores:                          # RFC-007 §4.1 metric families per scored quantity
+    acquirer_distribution:      [multiclass_log_loss, multiclass_brier, rank_topk, lead_time, calibration, vs_baseline]
+    p_acquired:                 [brier, bss]
+    stake_probabilities:        [brier, bss, log_loss, rank_topk, lead_time, calibration, vs_baseline]
+    expected_announcement_date: [abs_error]
+    relationships:              [recall_precision, label_accuracy]
 
 on_resolution:
   - { when: { acquisition: "any key except none" }, offer: { template: merger_arb, from: acquisition_announcement } }

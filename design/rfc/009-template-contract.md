@@ -57,7 +57,7 @@ RFCs explain **why**. The template folder says **what**, in a form code can load
 | `packet_layout` | Ordered list of core section kinds bound to quantities | packet rendering (RFC-006) |
 | `judgment_prompts` | Standard investor-judgment questions and when they fire | estimator, packet |
 | `extraction_targets` | Per document type, versioned (`<id>.<target>@<n>`) | evidence layer (RFC-001) |
-| `eval` | Eval spec and metrics schema | replay (RFC-007) |
+| `eval` | Eval spec, metrics schema, and `scores`: the RFC-007 metric families used per scored quantity | replay (RFC-007) |
 | `on_resolution` | Optional hand-off: start a thesis of another template when this one resolves in a given way | lifecycle (see *Chaining*) |
 
 ## What the core provides
@@ -116,7 +116,7 @@ A template conforms if:
 2. `values_schema` uses only core quantity types (plus constraints);
 3. every quantity in `packet_layout`, `thresholds`, `dependencies`, and `impact_rules` exists in `quantities`;
 4. every outcome in `outcomes` has a resolution rule, and every resolution rule names resolution-class evidence;
-5. its eval spec names a metric from the core registry (or its own metrics schema) for every tracked quantity it claims to evaluate.
+5. its manifest's `eval.scores` names, for every quantity it scores, only metric families that the RFC-007 §4.1 registry allows for that quantity's type.
 
 The core conforms if **no template id or template-specific term appears in `schemas/core/` or in the normative text of RFC-001–007**. Examples are allowed only when labeled `Example (<template id>)`. `design/check.py` checks both.
 

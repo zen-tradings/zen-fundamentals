@@ -147,17 +147,18 @@ Unless stated otherwise, each case is weighted equally: a metric is averaged ove
 
 ### 4.1 Metric registry (by quantity type)
 
-Eval specs pick from these families, one or more per scored quantity (RFC-009 quantity types):
+Eval specs pick from these families, one or more per scored quantity (RFC-009 quantity types). A template declares its choices in its manifest's `eval.scores` map, using the ids below, and `design/check.py` checks them against this table.
 
-| Quantity type | Metric families |
+| Quantity type | Metric families (id) |
 |---|---|
-| `probability`, `derived_probability` | Brier, Brier skill score vs. a base-rate baseline, log loss (probabilities floored at 0.001), calibration table |
-| `outcome_distribution` | multi-class log loss and Brier; rank of the realized key, top-k hit rate; lead time with false-alarm rate |
-| `probability_map` | binary Brier and log loss per scored key; rank and top-k among keys; lead time with false-alarm rate |
-| `scenario_set` | multi-class Brier over outcomes; relative value error for the realized outcome |
-| `date_estimate` | absolute error (days), signed bias; reported without a CI when fewer than 5 cases qualify |
-| `condition_list`, `relationship_list` | recall and precision by canonical key against point-in-time labels; status accuracy; label accuracy (reported next to annotator agreement) |
-| any quantity with a comparison baseline | paired difference, agent minus baseline, on the same checkpoints |
+| `probability`, `derived_probability` | Brier (`brier`), Brier skill score vs. a base-rate baseline (`bss`), log loss with probabilities floored at 0.001 (`log_loss`), calibration table (`calibration`) |
+| `outcome_distribution` | multi-class log loss (`multiclass_log_loss`) and Brier (`multiclass_brier`); rank of the realized key and top-k hit rate (`rank_topk`); lead time with false-alarm rate (`lead_time`); `calibration` |
+| `probability_map` | binary `brier`, `bss`, and `log_loss` per scored key; `rank_topk` among keys; `lead_time`; `calibration` |
+| `scenario_set` | `multiclass_brier` over outcomes; relative value error for the realized outcome (`value_error`) |
+| `date_estimate` | absolute error in days (`abs_error`), signed bias (`bias`); reported without a CI when fewer than 5 cases qualify |
+| `condition_list`, `relationship_list` | recall and precision by canonical key against point-in-time labels (`recall_precision`); status accuracy (`status_accuracy`); label accuracy, reported next to annotator agreement (`label_accuracy`) |
+| `facts` | field accuracy against labels (`field_accuracy`) |
+| any quantity with a comparison baseline | paired difference, agent minus baseline, on the same checkpoints (`vs_baseline`) |
 
 Calibration bins are set by the spec, because the useful range differs by template (low, uneven bins for rare events; high bins for mostly-completing outcomes).
 
@@ -217,7 +218,7 @@ Core error classes, every template:
 
 | Error class | Mutation | Expected catcher |
 |---|---|---|
-| `type_invariant` | Break a quantity-type invariant (a distribution no longer sums to 1, a derived value no longer matches its source, a resolved key not at 0 or 1) | self-check (code) |
+| `type_invariants` | Break a quantity-type invariant (a distribution no longer sums to 1, a derived value no longer matches its source, a resolved key not at 0 or 1) | self-check (code) |
 | `missing_citation` | Remove all citations from one changed quantity | self-check (code) |
 | `future_citation` | Add a citation to a canary document with `as_of > clock` | self-check (code). Recorded as `injected`; it does **not** count as a PIT violation **provided it is caught before commit**. If it reaches commit, it is a real violation. |
 | `wrong_citation` | Swap a citation's `evidence_id` for an unrelated item in the evidence set | self-check (model), then auditor |

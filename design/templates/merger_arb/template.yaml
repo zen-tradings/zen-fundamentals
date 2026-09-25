@@ -110,3 +110,8 @@ extraction_targets:
 eval:
   spec: eval.md
   metrics_schema: eval-metrics.schema.json
+  scores:
+    scenarios:           [multiclass_brier, value_error]
+    close_probability:   [brier, bss, calibration, vs_baseline]
+    expected_close_date: [abs_error, bias]
+    conditions:          [recall_precision, status_accuracy]

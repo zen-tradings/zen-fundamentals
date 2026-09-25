@@ -128,7 +128,7 @@
             "by_class": {
               "type": "object",
               "propertyNames": { "pattern": "^[a-z][a-z0-9_]{1,63}$" },
-              "description": "Core classes (missing_citation, future_citation, wrong_citation, unflagged_secondary, type_invariant) plus template classes.",
+              "description": "Core classes (missing_citation, future_citation, wrong_citation, unflagged_secondary, type_invariants) plus template classes.",
               "additionalProperties": {
                 "type": "object",
                 "required": ["n_injected"],

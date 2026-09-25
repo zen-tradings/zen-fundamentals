@@ -261,9 +261,9 @@ thresholds:                     # template.yaml; a thesis overrides via policy.m
   p_acquired:                 { logit_abs: 0.7, prob_abs_min: 0.02 }
   stake_probabilities:        { logit_abs: 0.7, prob_abs_min: 0.02 }
   expected_announcement_date: { days: 45 }
-  relationships:              { on: [added, removed, status_changed, value_changed, label_changed] }
-  signals:                    { on: [added, status_changed] }
-  target_facts:               { on: [listing, control, customer_concentration] }
+  relationships:              { "on": [added, removed, status_changed, value_changed, label_changed] }
+  signals:                    { "on": [added, status_changed] }
+  target_facts:               { "on": [listing, control, customer_concentration] }
 params:                         # a thesis overrides via policy.template_params
   prior_gap_flag: 3.0           # odds ratio between agent and reference prior on p_acquired, or a different top candidate
   stake_min_pct: 0.05

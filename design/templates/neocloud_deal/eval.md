@@ -238,7 +238,7 @@ Metrics are the RFC-007 §6.1 set. Template specializations:
 
 ### 6.2 Template error classes
 
-Core error classes (RFC-007 §6.2) apply as well. `distribution_sum` and `derivation_mismatch` are this template's instances of the core `type_invariant` class, and `unflagged_rumor` is its instance of `unflagged_secondary`.
+Core error classes (RFC-007 §6.2) apply as well. `distribution_sum` and `derivation_mismatch` are this template's instances of the core `type_invariants` class, and `unflagged_rumor` is its instance of `unflagged_secondary`.
 
 | Error class | Mutation | Expected catcher |
 |---|---|---|
