@@ -2,13 +2,13 @@
 
 Status: Discussion
 
-Date: 2026-09-23 (revised 2026-09-24 for `neocloud_deal`)
+Date: 2026-09-23 (revised 2026-09-24: template-agnostic, RFC-009)
 
 Depends on: RFC-001 (evidence vs. judgment), RFC-002 (lifecycles), RFC-003 (fencing)
 
 ## Problem
 
-The product's core object used to be a newsletter: an audience, a cadence, and channels, producing articles. That doesn't fit a research agent whose job is to hold a view and keep it current, such as "who is likely to buy or take a stake in this neocloud within the next 12 months". What we need to audit is **what the agent believed, when, and why**: which candidate it ranked first after a given filing, what evidence moved that, and whether a human approved it. The prose around it matters much less.
+The product's core object used to be a newsletter: an audience, a cadence, and channels, producing articles. That doesn't fit a research agent whose job is to hold a view about a deal and keep it current. What we need to audit is **what the agent believed, when, and why**: what it estimated after a given filing, what evidence moved that, and whether a human approved it. (Example (`neocloud_deal`): which candidate it ranked as the likeliest acquirer of a neocloud after an SC 13D.) The prose around it matters much less.
 
 ## Proposal
 
@@ -18,11 +18,11 @@ A thesis is a long-lived, declarative spec for a view the agent maintains about 
 
 | Field | Meaning |
 |---|---|
-| `subject` | What the thesis is about. It is template-typed; for `neocloud_deal` it names the target, the candidate acquirers and investors, and the horizon. |
-| `template` | `{id, version}` of the centrally maintained template it instantiates (RFC-008). |
-| `tracked_quantities` | The quantities the agent estimates. They default to the template's list, and a thesis can only disable optional quantities; it cannot add new ones. Every `neocloud_deal` quantity is required. |
-| `sources` | Adapter configs (EDGAR, press releases, named-outlet news, web search) with priority and tier. |
-| `policy` | Material-change thresholds (overriding template defaults), budget, latency, review mode, and routing overrides that stay within template constraints. |
+| `subject` | What the thesis is about, shaped by the template's subject schema (RFC-009). It names the parties that can appear as keys in outcome quantities. |
+| `template` | `{id, version}` of the centrally maintained template it instantiates (RFC-009). |
+| `tracked_quantities` | The quantities the agent estimates. They default to the template's list, and a thesis can only disable optional quantities; it cannot add new ones. |
+| `sources` | Adapter configs (EDGAR, press releases, named-outlet news, web search, market data), limited to the template's `sources_allowed`, with priority and tier. |
+| `policy` | Material-change thresholds (overriding template defaults), `template_params`, the scheduled re-estimate cadence, budget, latency, review mode, and routing overrides that stay within template constraints. |
 
 Mutable metadata: `status` (`active | paused | resolved | archived`), `watching` (bool), `head_version_id`, `spec_revision`.
 
@@ -81,7 +81,7 @@ A ThesisVersion is an **immutable** snapshot of every tracked quantity at a give
 | `values` | The new value of every tracked quantity, typed by the template |
 | `deltas` | Per-quantity change against the parent: `changed`, the typed delta, and whether it is `material` and which rule fired |
 | `carried_forward` | Quantities not re-estimated in this evaluation, copied from the parent |
-| `comparison_baseline` | The template's comparison baseline at `clock`, with its inputs (RFC-009); for `neocloud_deal`, the rule-based reference prior (RFC-008 §Reference prior). Shown next to the agent's estimate. It is **not** a tracked quantity, never triggers the gate, and is not an input to the estimator. |
+| `comparison_baseline` | The template's comparison baseline at `clock`, with its inputs (RFC-009), for example a market-implied probability or a rule-based prior (Example (`neocloud_deal`): the reference prior, RFC-008). Shown next to the agent's estimate. It is **not** a tracked quantity, never triggers the gate, and is not an input to the estimator. |
 | `self_check` | Result of the estimator's pre-emit self-check (RFC-005 step 8) |
 | `recoveries` | Tool or extraction failures in this evaluation and how each was handled: retry, alternate path, or degraded (RFC-005) |
 | `review_packet_id` | Link to the ReviewPacket (RFC-006) |
@@ -104,7 +104,7 @@ Schema: [`thesis-version.schema.json`](../schemas/core/thesis-version.schema.jso
 A version is created only when the material-change gate says yes (RFC-005), and also:
 
 - on the initial evaluation after a thesis is created (`trigger: initial`);
-- on resolution evidence (`trigger: resolution`, always material), including partial resolutions such as a candidate's stake event (RFC-008);
+- on resolution evidence (`trigger: resolution`, always material), including partial resolutions that resolve one key of a quantity (Example (`neocloud_deal`): a candidate's stake event);
 - on a manual `run`, a spec revision, or a template's scheduled re-estimate when some quantity changes materially.
 
 Non-material evaluations produce an **EvaluationRecord**, not a version (RFC-005). EvaluationRecords are immutable too, but nobody is notified about them and they never become the head.
@@ -122,13 +122,13 @@ needs_review┼──────────────► rejected   (head un
 - Only one candidate is pending per thesis at a time. A newer material candidate supersedes the pending one. The newer one's deltas and ReviewPacket are computed against the approved head, so a reviewer always sees the cumulative change since the last approved view. Superseded versions are kept and linked (`supersedes`).
 - If a newer candidate is within the material-change threshold of the pending candidate, it does **not** supersede. It is recorded as an EvaluationRecord with decision `consistent_with_pending`. This stops reviewers from being interrupted mid-review by noise.
 - `approved` requires the audit to have passed, or an explicit override reason (RFC-006).
-- In replay evaluation only, `review: auto` approves each version at commit so the timeline can be scored without humans (RFC-007). Live theses reject `review: auto`. Auto-approval follows the same audit rule as a human, with one scripted exception: a version whose **only** audit failure is the `secondary_only` rumor check (RFC-008 *Rumor handling*) is approved with the override reason `replay_auto`. This stands in for a reviewer who accepts the rumor. Without it, rumor-driven moves could never reach the head in replay, and lead time and the rumor metrics would measure nothing. Any other audit failure leaves the version unapproved and the head unchanged. RFC-007 reports `replay_auto` overrides per case.
+- In replay evaluation only, `review: auto` approves each version at commit so the timeline can be scored without humans (RFC-007). Live theses reject `review: auto`. Auto-approval follows the same audit rule as a human, with one scripted exception: for templates that opt in to the `secondary_only` audit, a version whose **only** audit failure is that check is approved with the override reason `replay_auto`. This stands in for a reviewer who accepts the rumor. Without it, rumor-driven moves could never reach the head in replay, and timing metrics would measure nothing. Any other audit failure leaves the version unapproved and the head unchanged. RFC-007 reports `replay_auto` overrides per case.
 
-> Trade-off: superseding means a reviewer never signs off on intermediate candidates, so some intermediate reasoning gets less human scrutiny. We accept that because the alternative, a review queue that grows with filing frequency, would make human review a bottleneck exactly when a target is busiest (a financing, an IPO filing, and a wave of reported talks in the same week).
+> Trade-off: superseding means a reviewer never signs off on intermediate candidates, so some intermediate reasoning gets less human scrutiny. We accept that because the alternative, a review queue that grows with filing frequency, would make human review a bottleneck exactly when a subject is busiest (Example (`neocloud_deal`): a financing, an IPO filing, and a wave of reported talks in the same week).
 
 ### Thesis status
 
-`active` (being monitored or runnable) → `resolved` (final resolution evidence approved, or the template horizon ended; no further evaluations; outcome_audit feedback created) → `archived`. A partial resolution (a candidate's stake event) leaves the thesis `active`. `paused` stops the watch loop but keeps `run` available.
+`active` (being monitored or runnable) → `resolved` (full-resolution evidence approved, or the template's horizon ended; no further evaluations; outcome_audit feedback created; any `on_resolution` hand-off offered, RFC-009) → `archived`. A partial resolution leaves the thesis `active`. `paused` stops the watch loop but keeps `run` available.
 
 ## Feedback
 
@@ -137,7 +137,7 @@ Feedback is structured, typed, and append-only. There are three kinds:
 | Kind | Attached to | Payload | Who |
 |---|---|---|---|
 | `user_rating` | version (optionally one quantity or claim) | `rating` (−2..+2), `dimension` (`accuracy | usefulness | citation_quality | packet_clarity`), optional `comment` | reviewer or thesis owner |
-| `outcome_audit` | thesis | `acquisition_outcome`, `stake_outcomes`, `resolution_date`, `relationships_timeline`, plus computed per-version scores using the **RFC-007 §4 metric definitions** and an `eval_case_ref` when the thesis is promoted into the replay dataset | created automatically on `resolved` from the resolution evidence (or the horizon end), then confirmed by a human |
+| `outcome_audit` | thesis | the template's outcome labels, `resolution_date`, point-in-time labels for scored list quantities (RFC-007 §1.3), plus computed per-version scores using the **RFC-007 §4 metric definitions** and an `eval_case_ref` when the thesis is promoted into the replay dataset | created automatically on `resolved` from the resolution evidence (or the horizon end), then confirmed by a human |
 | `tool_execution_quality` | evaluation (optionally one call) | `tool_or_route`, `error_class`, `outcome` (`ok | wrong_result | malformed | timeout | recovered | failed`), `details` | emitted automatically from `RecoveryEvent`s (RFC-005); humans can add `wrong_result` reports |
 
 Resolved live theses are post-cutoff for every model already deployed, which makes them the best future source of uncontaminated replay cases. `outcome_audit` records the fields RFC-007 §1.3 needs, so promoting a thesis into the dataset is a copy, not a re-annotation (it still gets second-annotator review).
@@ -148,7 +148,7 @@ Resolved live theses are post-cutoff for every model already deployed, which mak
 
 | RFC-002 lifecycle | Here |
 |---|---|
-| Evidence ingest | Filings, releases, and news fetched for the target and candidates (RFC-001) |
+| Evidence ingest | Filings, releases, news, and prices fetched for the subject's parties (RFC-001) |
 | Evaluation | Evaluation job (`queued → running ⇄ needs_input → completed | failed | cancelled | superseded`), producing a ThesisVersion or an EvaluationRecord |
 | Version review | `needs_review → approved | rejected | superseded`, in `review_events` |
 | Delivery | Optional webhook on `approved` or `thesis_resolved`, via the outbox |
@@ -158,5 +158,5 @@ The version, its ReviewPacket, and any outbox intent are written in a single tra
 
 ## Open questions
 
-- When an acquisition is announced, should the resolved thesis link to a follow-on thesis that tracks whether the deal closes, or is that out of scope?
-- Should adding a candidate mid-horizon be allowed as a spec revision, given that the new candidate's probabilities have no history to diff against and RFC-007 scores only fixed candidate lists?
+- Should a template be allowed to change mid-thesis, or must a change always close the thesis and hand off to a new one (RFC-009 *Chaining*)?
+- Should adding a subject party mid-thesis be allowed as a spec revision, given that the new party's probabilities have no history to diff against and replay scores only fixed party lists? (Example (`neocloud_deal`): adding a candidate mid-horizon.)

@@ -68,7 +68,7 @@ Stored in `dataset/cases/<case_id>.json`:
 | `press_releases[]` | Target and candidate releases that mention the target, same period: source URL, archived copy hash, wire timestamp. Excluded if no verifiable timestamp. |
 | `news[]` | Named-outlet articles mentioning the target, same period: URL, outlet, stated publication time, first archive capture time, archived copy hash (§1.4) |
 | `acquisition_outcome` | `{key: <candidate> | other | none, announcement_date?, evidence?}` |
-| `stake_outcomes[]` | One per candidate: `{candidate, occurred, date?, basis: pct | usd | acquisition, structure?, structure_flags?, evidence?, confirmation: primary | unconfirmed}`. `structure` follows the RFC-008 tag rules. |
+| `stake_outcomes[]` | One per candidate: `{candidate, occurred, date?, basis: pct | usd | acquisition, labels?, label_flags?, evidence?, confirmation: primary | unconfirmed}`. `labels.structure` follows the RFC-008 tag rules. |
 | `resolution_date` | The acquisition announcement date if there is one, else `window.end` |
 | `relationships_timeline[]` | Every RFC-008 relationship key between the target and a candidate, with `first_disclosed_as_of`, status changes and their `as_of`, structure tags (and tag changes) for `equity` and `debt` items, and the supporting evidence. This makes relationship labels point-in-time: the set "active at clock `t`" can be computed for any checkpoint. |
 | `target_facts_at_start` | Listing, control, capital, and concentration facts at `window.start` |

@@ -2,37 +2,21 @@
 
 Status: Discussion
 
-Date: 2026-09-24 (replaces the `merger_arb` draft of 2026-09-23)
+Date: 2026-09-24 (replaces the `merger_arb` draft of 2026-09-23; files split out per RFC-009)
 
-Depends on: RFC-004, RFC-005, RFC-006, RFC-007
+Depends on: RFC-004, RFC-005, RFC-006, RFC-007, RFC-009
 
 ## Problem
 
-A thesis is only as good as the questions it tracks. If every user defined their own quantities, extraction targets, and thresholds, the result would be theses that can't be compared, evaluated, or reviewed consistently. Templates are maintained centrally so one replay evaluation (RFC-007) covers every thesis that uses them. This RFC defines the only template we ship: `neocloud_deal`.
+A thesis is only as good as the questions it tracks. If every user defined their own quantities, extraction targets, and thresholds, the result would be theses that can't be compared, evaluated, or reviewed consistently. Templates are maintained centrally so one replay evaluation (RFC-007) covers every thesis that uses them. This RFC explains the first template: `neocloud_deal`.
 
 The question it answers: **for one neocloud (a company whose main business is renting GPU or accelerator compute, or building AI-dedicated data-center capacity), who is likely to acquire it or take a strategic equity stake in it within a fixed horizon, and how likely is each?** Candidates are AI labs (Anthropic, OpenAI, …), hyperscalers, chipmakers, and other neoclouds.
 
 This is a **pre-announcement** template. Nothing has been signed when the thesis starts, most theses resolve to "nothing happened", and the evidence is indirect: compute contracts, customer concentration, ownership tables, financing, and reported talks.
 
-## Template contract (all templates)
+## Template files
 
-A template defines:
-
-1. tracked quantities and their types;
-2. required evidence types;
-3. extraction targets, per document type;
-4. the ReviewPacket layout;
-5. default `material_change` thresholds.
-
-It also defines dependency edges between quantities, deterministic impact rules, resolution-class evidence, the scheduled re-estimate cadence, routing constraints, and self-check tolerances.
-
-Templates follow semver, and a thesis pins `{id, version}`:
-
-- **major**: the quantity schema or the outcome definitions change (requires a new thesis or an explicit migration);
-- **minor**: extraction targets, prompts, impact rules, or the reference-prior weights change;
-- **patch**: threshold defaults or packet layout change.
-
-A replay result is valid only for the template version it ran on.
+This RFC is the rationale. The machine-readable template is [`design/templates/neocloud_deal/`](../templates/neocloud_deal/): the manifest [`template.yaml`](../templates/neocloud_deal/template.yaml), subject, values, params, and baseline schemas, vocabularies, and the eval spec [`eval.md`](../templates/neocloud_deal/eval.md). What a template must provide, and how versions work, is defined once for all templates in [RFC-009](009-template-contract.md).
 
 > Trade-off: central templates give up per-user flexibility in exchange for comparability. Every `neocloud_deal` thesis is evaluated by the same RFC-007 run. A thesis can override thresholds, choose its candidates, and set its horizon, but it cannot add quantities or change the outcome definitions.
 
@@ -94,7 +78,7 @@ Stake events are **not** mutually exclusive across candidates. `stake_probabilit
 
 Much of the equity in this sector is not a pure strategic bet. A chipmaker invests in a neocloud that spends the money on the chipmaker's accelerators. An AI lab receives warrants as part of a compute contract. An investor agrees to buy any capacity the target can't sell. These deals are hard to classify by intent, and they are probably a much weaker signal of a coming acquisition than pure equity.
 
-The template keeps the **event** rule mechanical: equity that crosses a threshold is a stake event, whatever its motive. Every stake event, and every `equity` or `debt` relationship, also carries a **structure tag** that records the commercial context. Tags describe the deal; they never decide whether an event happened.
+The template keeps the **event** rule mechanical: equity that crosses a threshold is a stake event, whatever its motive. Every stake event, and every `equity` or `debt` relationship, also carries a **structure tag** (the `structure` label set, RFC-009 *Descriptive labels*) that records the commercial context. Tags describe the deal; they never decide whether an event happened.
 
 | Tag | Applies when (all from primary sources) |
 |---|---|
@@ -104,11 +88,11 @@ The template keeps the **event** rule mechanical: equity that crosses a threshol
 | `pure_equity` (`arms_length` for debt) | None of the above: no commercial agreement between the two is linked to the investment or falls within 90 days of it |
 | `undetermined` | Primary sources don't say enough to decide (common at private targets). Secondary reports may be cited in the rationale, but can't set a tag. |
 
-When several tags apply, `structure` is the first match in the order above (vendor financing, then backstop, then customer kicker), and `structure_flags` lists every tag that applies. A chipmaker that supplies accelerators **and** backstops capacity is tagged `vendor_financing`, with flags `[vendor_financing, capacity_backstop]`.
+When several tags apply, `labels.structure` is the first match in the order above (vendor financing, then backstop, then customer kicker), and `label_flags.structure` lists every tag that applies. A chipmaker that supplies accelerators **and** backstops capacity is tagged `vendor_financing`, with flags `[vendor_financing, capacity_backstop]`.
 
-Each tagged item lists `linked_relationships`: the supply, compute-contract, or backstop relationship keys that justify the tag. The self-check requires the link (see *Self-check tolerances*).
+Each tagged item lists `linked`: the supply, compute-contract, or backstop relationship keys that justify the tag. The self-check requires the link (see *Self-check tolerances*).
 
-> Trade-off: putting the judgment into a tag instead of the event definition keeps outcomes objective and rebuildable, and it keeps the few positive events in one pool. The cost is that `stake_probabilities` answers "will they put in equity?", not "will they make a strategic bet?". A user who cares only about strategic bets reads the tag and the split results in RFC-007 §4. The alternative, a separate `strategic_financing` event type, would have made whether an event happened depend on judging intent.
+> Trade-off: putting the judgment into a tag instead of the event definition keeps outcomes objective and rebuildable, and it keeps the few positive events in one pool. The cost is that `stake_probabilities` answers "will they put in equity?", not "will they make a strategic bet?". A user who cares only about strategic bets reads the tag and the split results in the eval spec (`eval.md` §4). The alternative, a separate `strategic_financing` event type, would have made whether an event happened depend on judging intent.
 
 ### Resolution
 
@@ -127,15 +111,15 @@ All of these are resolution-class evidence: always material, and they skip the d
 |---|---|---|---|
 | `acquirer_distribution` | `candidate_distribution` | yes | One entry per candidate key plus `other` and `none`: `{key, probability, rationale}`. Probabilities sum to 1. |
 | `p_acquired` | `probability` (derived) | yes | `1 − P(none)`. Computed by code from `acquirer_distribution`, never estimated directly. Claim provenance is `computed`. |
-| `stake_probabilities` | `probability_map` | yes | One entry per candidate: `{key, probability, resolved, structure?, rationale}`. Independent probabilities; they do not sum to 1. `structure` is set when resolved. |
+| `stake_probabilities` | `probability_map` | yes | One entry per candidate: `{key, probability, resolved, labels?, rationale}`. Independent probabilities; they do not sum to 1. `labels.structure` is set when resolved. |
 | `expected_announcement_date` | `date` | yes | Point estimate of the acquisition announcement date **conditional on an acquisition happening in the horizon**, with an optional 80% interval `{low, high}`. Must lie in `[clock, horizon.end]`. |
-| `relationships` | `relationship_list` | yes | Disclosed ties between the target and each candidate. Each item: `{key, candidate, type, role, status, value?, term?, ownership_pct?, structure?, structure_flags?, linked_relationships?, first_disclosed_as_of}`. `structure` is required on `equity` and `debt` items. |
-| `signals` | `signal_list` | yes | Canonical deal-relevant signals. Each item: `{key, description, status, direction, candidates[], basis}`. |
+| `relationships` | `relationship_list` | yes | Disclosed ties between the target and each candidate. Each item: `{key, party, type, role, status, value?, term_years?, ownership_pct?, labels?, label_flags?, linked?, first_disclosed_as_of}`. `labels.structure` is required on `equity` and `debt` items. |
+| `signals` | `signal_list` | yes | Canonical deal-relevant signals. Each item: `{key, description, status, direction, parties[], basis}`. |
 | `target_facts` | `target_facts` | yes | `listing {status, exchange?, ticker?}`, `control {voting_control_holder?, dual_class, change_of_control_provisions[]}`, `capital {last_valuation?, total_debt?, contracted_backlog?}`, `capacity {power_mw?, accelerators?}`, `customer_concentration {top_customer?, top_customer_share?}` |
 
 JSON shapes are in [`templates/neocloud_deal/values.schema.json`](../templates/neocloud_deal/values.schema.json), built from the core quantity types (RFC-009). The machine-readable manifest is [`template.yaml`](../templates/neocloud_deal/template.yaml).
 
-> Trade-off: deriving `p_acquired` from the distribution keeps the headline consistent with the per-candidate table by construction, and forces the model to say *who* it thinks buys. Spreading probability over up to 14 outcomes gives the model more ways to be wrong than one number, and most of the mass sits on `none`. The self-check and the ranking metrics in RFC-007 §4 exist to catch that.
+> Trade-off: deriving `p_acquired` from the distribution keeps the headline consistent with the per-candidate table by construction, and forces the model to say *who* it thinks buys. Spreading probability over up to 14 outcomes gives the model more ways to be wrong than one number, and most of the mass sits on `none`. The self-check and the ranking metrics in the eval spec (`eval.md` §4) exist to catch that.
 
 ### Relationship vocabulary
 
@@ -257,7 +241,7 @@ These rules are applied before the planner, and they can only add affected quant
 
 ## Scheduled re-estimate
 
-Probabilities over a fixed horizon should fall as the horizon runs out with nothing happening. So this template requires a **scheduled re-estimate**: if no evaluation has run for `reestimate_days` (default 30), an evaluation runs with `trigger: scheduled`, `clock` = the scheduled time, and no new evidence. It re-estimates the time-sensitive quantities listed in the impact rules. A scheduled evaluation goes through the same gate as any other, so most end as `below_threshold` records. Its changes are justified by a `computed` elapsed-time claim plus the evidence the head already cited (RFC-005 step 8), since there is no new evidence to cite. (This is unrelated to the worker lease heartbeat in RFC-003.)
+Probabilities over a fixed horizon should fall as the horizon runs out with nothing happening. So this template requires a **scheduled re-estimate**: if no evaluation has run for 30 days (`scheduled_reestimate.days`), an evaluation runs with `trigger: scheduled`, `clock` = the scheduled time, and no new evidence. It re-estimates the time-sensitive quantities listed in the impact rules. A scheduled evaluation goes through the same gate as any other, so most end as `below_threshold` records. Its changes are justified by a `computed` elapsed-time claim plus the evidence the head already cited (RFC-005 step 8), since there is no new evidence to cite. (This is unrelated to the worker lease heartbeat in RFC-003.)
 
 > Trade-off: a scheduled re-estimate costs one estimator call per thesis per month with no new information. Without it, the approved head would keep a 12-month probability unchanged until month 11, and RFC-007 would score that stale number at every checkpoint.
 
@@ -272,18 +256,20 @@ Base rates are low, so absolute probability thresholds either page on noise near
 These are **starting points**, to be tuned on replay (RFC-007). They are not validated values.
 
 ```yaml
-material_change:
+thresholds:                     # template.yaml; a thesis overrides via policy.material_change
   acquirer_distribution:      { logit_abs: 0.7, prob_abs_min: 0.02, on_top_rank_change: true }  # per key, incl. other and none
   p_acquired:                 { logit_abs: 0.7, prob_abs_min: 0.02 }
   stake_probabilities:        { logit_abs: 0.7, prob_abs_min: 0.02 }
   expected_announcement_date: { days: 45 }
-  relationships:              { on: [added, removed, status_changed, value_changed, structure_changed] }
+  relationships:              { on: [added, removed, status_changed, value_changed, label_changed] }
   signals:                    { on: [added, status_changed] }
   target_facts:               { on: [listing, control, customer_concentration] }
-prior_gap_flag: 3.0      # odds ratio between agent and reference prior on p_acquired, or a different top candidate
-stake_min_pct: 0.05
-stake_min_usd: 1000000000
-reestimate_days: 30
+params:                         # a thesis overrides via policy.template_params
+  prior_gap_flag: 3.0           # odds ratio between agent and reference prior on p_acquired, or a different top candidate
+  stake_min_pct: 0.05
+  stake_min_usd: 1000000000
+  structure_link_window_days: 90
+scheduled_reestimate: { days: 30 }
 ```
 
 `on_top_rank_change`: a change in which candidate (excluding `none`) has the highest probability is material, even when no single probability crosses the threshold.
@@ -402,7 +388,7 @@ Sections in order:
 | Resolved stakes have probability 1 | exact |
 | `expected_announcement_date` in `[clock, horizon.end]` | exact |
 | Every candidate appears exactly once in each distribution | exact |
-| Every `equity` and `debt` relationship, and every resolved stake, has a `structure` tag; a tag other than `pure_equity`, `arms_length`, or `undetermined` lists ≥ 1 `linked_relationships` key of the required type (supply for `vendor_financing`, backstop for `capacity_backstop`, compute contract for `customer_equity_kicker`) | exact |
+| Every `equity` and `debt` relationship, and every resolved stake, has a `structure` label; a label other than `pure_equity`, `arms_length`, or `undetermined` lists ≥ 1 `linked` key of the required type (supply for `vendor_financing`, backstop for `capacity_backstop`, compute contract for `customer_equity_kicker`) | exact |
 
 ## Open questions
 

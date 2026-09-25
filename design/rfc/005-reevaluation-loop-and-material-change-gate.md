@@ -2,13 +2,13 @@
 
 Status: Discussion
 
-Date: 2026-09-23 (revised 2026-09-24 for `neocloud_deal`)
+Date: 2026-09-23 (revised 2026-09-24: template-agnostic, RFC-009)
 
 Depends on: RFC-001, RFC-002, RFC-003, RFC-004
 
 ## Problem
 
-The old monitor loop scored "novelty" and published once novelty crossed a threshold. That fits content, not beliefs. A new filing can be completely novel and still change nothing we track (a candidate's 10-Q that mentions the target only in a list of suppliers). A short SC 13D line ("the reporting person may seek board representation") can move two quantities a lot. The loop has to ask **what this evidence changes**, not how new it is.
+The old monitor loop scored "novelty" and published once novelty crossed a threshold. That fits content, not beliefs. A new filing can be completely novel and still change nothing a thesis tracks, while one short line in another filing can move two quantities a lot. (Example (`neocloud_deal`): a candidate's 10-Q that lists the target among suppliers changes nothing; an SC 13D line saying the holder may seek board representation moves the acquirer distribution.) The loop has to ask **what this evidence changes**, not how new it is.
 
 ## Proposal
 
@@ -27,17 +27,17 @@ Every step from `impact` onward runs with a fixed `clock` (see *Point-in-time*).
 
 ### Steps
 
-1. **Ingest (evidence layer).** Adapters `discover → fetch → normalize`. Each item gets `as_of`, `tier`, `doc_type`, and entity links (CIKs, tickers, and named companies for private targets and candidates such as AI labs that have no CIK). Duplicates are dropped by content hash.
+1. **Ingest (evidence layer).** Adapters `discover → fetch → normalize`. Each item gets `as_of`, `tier`, `doc_type`, and entity links (CIKs, tickers, and names for parties that have no CIK, such as private companies). Duplicates are dropped by content hash.
 
 2. **Route (deterministic, no model).** Each thesis has a subscription derived from `sources`: entity IDs and form types. An evidence item is routed to every active, watching thesis whose subscription it matches.
 
-   Large candidate filings (a hyperscaler's 10-K) are routed only if they mention the target, by entity link.
+   Filings by related parties (`related_ciks`, `related_tickers`) are routed only if they mention a subject entity, by entity link. (Example (`neocloud_deal`): a hyperscaler candidate's 10-K reaches the thesis only if it names the target.)
 
-   > Trade-off: deterministic routing is cheap and auditable, but it will miss relevant evidence that doesn't name a subscribed entity (for example a regulator's market study of AI partnerships that names no company). Discovery requests (RFC-001) and secondary web search cover part of that gap.
+   > Trade-off: deterministic routing is cheap and auditable, but it will miss relevant evidence that doesn't name a subscribed entity (for example a regulator's market study that names no company). Discovery requests (RFC-001) and secondary web search cover part of that gap.
 
-3. **Batch.** Items routed to a thesis within `policy.debounce_s` of the first unprocessed item are batched into one evaluation job. Resolution-class evidence (template-defined, for example an acquisition announcement or a candidate's SC 13D crossing the stake threshold) skips the debounce.
+3. **Batch.** Items routed to a thesis within `policy.debounce_s` of the first unprocessed item are batched into one evaluation job. Resolution-class evidence (from the template's `outcomes`, RFC-009) skips the debounce. (Example (`neocloud_deal`): an acquisition announcement, or a candidate's SC 13D crossing the stake threshold.)
 
-   **Scheduled re-estimate.** A template can declare a re-estimate cadence (RFC-008: every 30 days by default). If no evaluation has run for that long, the scheduler creates an evaluation job with `trigger: scheduled` and no new evidence, so time-sensitive quantities are re-estimated as the horizon runs down.
+   **Scheduled re-estimate.** A template can declare a re-estimate cadence and the quantities it covers (RFC-009 `scheduled_reestimate`). If no evaluation has run for that long, the scheduler creates an evaluation job with `trigger: scheduled` and no new evidence, so time-sensitive quantities are re-estimated as time passes. (Example (`neocloud_deal`): every 30 days, so probabilities decay as the horizon runs down.)
 
    > Trade-off: debouncing merges an S-1 and its same-day exhibits into one evaluation, which cuts cost and duplicate versions. The price is up to `debounce_s` of added latency.
 
@@ -48,7 +48,7 @@ Every step from `impact` onward runs with a fixed `clock` (see *Point-in-time*).
 
    Evidence that arrives after job creation waits for the next job. Because of this, every live evaluation can later be re-run in replay with the same `clock` and `evidence_set`.
 
-5. **Impact mapping (planner role).** Input: the new evidence, the current head values, and the template's quantity definitions. Output: an `ImpactAssessment` that says, for **each** tracked quantity, `affected: bool` with a short rationale and pointers to evidence spans. Template rules are applied first and can only *add* affected quantities, never remove them. For example, `S-1 → {target_facts, signals, acquirer_distribution}` and `text mentioning "strategic alternatives" → {signals, acquirer_distribution, expected_announcement_date}`. Template dependency edges then propagate: if `relationships` is affected, then `acquirer_distribution` and `stake_probabilities` are too, and `acquirer_distribution` always implies the derived `p_acquired` (RFC-008).
+5. **Impact mapping (planner role).** Input: the new evidence, the current head values, and the template's quantity definitions. Output: an `ImpactAssessment` that says, for **each** tracked quantity, `affected: bool` with a short rationale and pointers to evidence spans. Template `impact_rules` are applied first and can only *add* affected quantities, never remove them. Template `dependencies` then propagate: every quantity downstream of an affected one is affected too, and a source quantity always implies its derived quantities. (Example (`neocloud_deal`): `S-1 → {target_facts, signals, acquirer_distribution}`; if `relationships` is affected, so are `acquirer_distribution` and `stake_probabilities`, and with them the derived `p_acquired`.)
 
    If nothing is affected, the job ends with an EvaluationRecord (`decision: no_impact`).
 
@@ -56,29 +56,29 @@ Every step from `impact` onward runs with a fixed `clock` (see *Point-in-time*).
 
 6. **Extract (extractor role).** For affected quantities, run the template's extraction targets over the new documents. Document-local extractions come from the shared cache when present (RFC-001).
 
-7. **Estimate (estimator role).** Re-estimate the affected quantities from the EvidenceMatrix, which is the ranked, deduplicated, quota-limited, point-in-time view of the thesis's evidence (`TaskContract → SearchPlan → EvidenceMatrix`), plus the extractions. The estimator also reconciles conflicting signals (for example a news report of talks and a company denial) and records how it resolved them. The estimator lane has **no fetch tools**; it sees only what the EvidenceMatrix gives it.
+7. **Estimate (estimator role).** Re-estimate the affected quantities from the EvidenceMatrix, which is the ranked, deduplicated, quota-limited, point-in-time view of the thesis's evidence (`TaskContract → SearchPlan → EvidenceMatrix`), plus the extractions. The estimator also reconciles conflicting signals (for example a news report and a company denial) and records how it resolved them. The estimator lane has **no fetch tools**; it sees only what the EvidenceMatrix gives it.
 
-   `p_acquired` is **derived** from the `acquirer_distribution` quantity, not estimated separately (RFC-008). The estimator re-estimates the distribution, and code computes `p_acquired`. Resolved stake probabilities are fixed at 1 by code.
+   `derived_probability` quantities are computed by code from their source quantity, never estimated. Resolved keys of a `probability_map` are fixed by code. (Example (`neocloud_deal`): `p_acquired = 1 − P(none)` from `acquirer_distribution`; a resolved stake is fixed at 1.)
 
-   The estimator does **not** see the template's reference prior. It is computed alongside the estimate and shown to the reviewer (RFC-006).
+   The estimator does **not** see the template's comparison baseline. It is computed alongside the estimate and shown to the reviewer (RFC-006).
 
-   > Trade-off: keeping the reference prior away from the estimator keeps its view independent. That is what makes "agent vs. prior" a meaningful comparison in RFC-007, and it stops the agent from anchoring on a crude heuristic. The cost is small, since the prior is built from the same extractions the estimator already sees.
+   > Trade-off: keeping the baseline away from the estimator keeps its view independent. That is what makes "agent vs. baseline" a meaningful comparison in RFC-007, and it stops the agent from echoing a market price or anchoring on a heuristic. The cost depends on the baseline: little for a heuristic built from the same extractions, more for a market price the estimator would otherwise never see (an ablation can measure it).
 
 8. **Self-check (estimator role + code).** Before emitting a candidate, the estimator runs an explicit self-check, and the result is recorded in `ThesisVersion.self_check` or `EvaluationRecord.self_check`. The checks are:
 
    | Check | How |
    |---|---|
-   | `acquirer_distribution` sums to 1 (tolerance 1e-6); every probability is in [0, 1]; every candidate appears exactly once | code |
-   | `p_acquired` equals the value derived from the distribution | code |
-   | Each candidate's stake probability ≥ its acquisition probability; resolved stakes are 1 | code |
-   | `expected_announcement_date` is in `[clock, horizon.end]` | code |
-   | Every equity and debt relationship and every resolved stake has a structure tag, and commercial tags link to the relationship that justifies them | code |
-   | Every changed quantity has ≥ 1 claim with a citation. For a `scheduled` evaluation, which has no new evidence, the change must instead carry a `computed` claim for the elapsed time (days since the head, days left in the horizon) plus the citations the head already relied on | code |
+   | Quantity-type invariants: every `outcome_distribution` and `scenario_set` sums to 1 (tolerance 1e-6) with every valid key exactly once; every probability is in [0, 1]; resolved `probability_map` keys are 0 or 1 | code |
+   | Every `derived_probability` equals the value computed from its source | code |
+   | Every changed quantity has ≥ 1 claim with a citation. For a `scheduled` evaluation, which has no new evidence, the change must instead carry a `computed` claim for the elapsed time (days since the head, and days left in the horizon if the template has one) plus the citations the head already relied on | code |
    | Every cited `as_of ≤ clock` | code |
-   | Relationship statuses agree with the rationale behind each candidate's probability (for example a `terminated` contract still treated as active), and the estimator's own narrative agrees with its numbers | estimator model, one self-review pass |
+   | The estimator's own narrative agrees with its numbers | estimator model, one self-review pass |
+   | Template `self_checks` (RFC-009), each `code` or `model` | as declared |
+
+   Example (`neocloud_deal`) template checks: each candidate's stake probability ≥ its acquisition probability; `expected_announcement_date` within `[clock, horizon.end]`; commercial structure labels link to the relationship behind them; relationship statuses agree with each candidate's rationale.
 
    On failure the estimator gets **one** revision. After that:
-   - a failed numeric reconciliation (sums, derivation, stake ≥ acquisition, date bounds) means the job **fails** (`self_check_failed`), because a version whose numbers don't add up is not reviewable;
+   - a failed numeric reconciliation (type invariants, derivations, or a template `code` check marked numeric) means the job **fails** (`self_check_failed`), because a version whose numbers don't add up is not reviewable;
    - a missing citation means the quantity is flagged uncertain and the audit will block approval;
    - an `as_of` violation is a hard error, as always;
    - a model-judged inconsistency means the item is flagged uncertain and listed in the ReviewPacket.
@@ -94,20 +94,22 @@ Every step from `impact` onward runs with a fixed `clock` (see *Point-in-time*).
 
 ### Material-change rules
 
-Rules are per quantity type. The shipped defaults are in the `neocloud_deal` template (RFC-008). They are **starting points to be tuned against replay results, not validated values.**
+Rules are per quantity type (RFC-009); rule shapes are in [`quantity-types.schema.json`](../schemas/core/quantity-types.schema.json) `Rules`. Each template ships defaults, and a thesis overrides them within the same shape. Defaults are **starting points to be tuned against replay results, not validated values.**
 
-Probability rules use log-odds with an absolute floor: a move is material if `|logit(new) − logit(head)| ≥ logit_abs` **and** `|new − head| ≥ prob_abs_min`. The floor stops a move from 0.001 to 0.003 from paging anyone.
+A probability rule is either absolute (`|new − head| ≥ abs`) or log-odds with an absolute floor (`|logit(new) − logit(head)| ≥ logit_abs` **and** `|new − head| ≥ prob_abs_min`). The floor stops a move from 0.001 to 0.003 from paging anyone.
 
 | Quantity type | Material if |
 |---|---|
-| `probability` | the log-odds rule holds (for a derived probability, this applies to the derived value) |
-| `candidate_distribution` | the log-odds rule holds for any key (including `other` and `none`), or the top-ranked key other than `none` changes (when `on_top_rank_change`) |
-| `probability_map` | the log-odds rule holds for any key, or a key becomes resolved |
-| `date` | `|new − head| ≥ days` |
-| `relationship_list` | any relationship added or removed, or any status or value change in `on:` |
-| `signal_list` | any signal added, or any status change in `on:` |
-| `target_facts` | any change to a field group listed in `on:` |
+| `probability`, `derived_probability` | the probability rule holds (for a derived probability, on the derived value) |
+| `outcome_distribution` | the probability rule holds for any key, or the top-ranked key (excluding a declared null outcome) changes when `on_top_rank_change` |
+| `probability_map` | the probability rule holds for any key, or a key becomes resolved |
+| `scenario_set` | any outcome's probability moves by `≥ prob_abs`, or its value moves by `≥ value_rel` (relative), or an outcome is added or removed |
+| `date_estimate` | `|new − head| ≥ days` |
+| `condition_list`, `relationship_list`, `signal_list` | any item added or removed, or any status, value, or label change listed in `on:` |
+| `facts` | any change to a field group listed in `on:` (or `any`) |
 | any | the trigger is resolution-class evidence |
+
+Example (`neocloud_deal`): log-odds rules with `logit_abs: 0.7`, `prob_abs_min: 0.02` on the acquirer distribution, `p_acquired`, and stake probabilities, plus the top-rank rule.
 
 Gate outcomes:
 
@@ -119,7 +121,7 @@ Gate outcomes:
 | Material vs. head but within threshold of the pending candidate | EvaluationRecord `consistent_with_pending` |
 | Unchanged | EvaluationRecord `no_change` |
 
-> Trade-off: log-odds thresholds treat a move from 0.02 to 0.04 as seriously as one from 0.33 to 0.50, which is what matters when base rates are low. They are harder for a reviewer to predict than "5 points", so the packet always shows the rule that fired and both the absolute and log-odds deltas.
+> Trade-off: log-odds thresholds treat a move from 0.02 to 0.04 as seriously as one from 0.33 to 0.50, which matters for rare events; absolute thresholds are easier to predict and suit probabilities near the middle. Templates choose per quantity, and the packet always shows the rule that fired with both the absolute and log-odds deltas.
 
 ### EvaluationRecord
 
@@ -154,28 +156,21 @@ Tool and extraction failures are retried or routed to an alternate path, and eve
 ### Lifecycle, fencing, idempotency
 
 - Evaluation jobs follow the RFC-002 lifecycle: `queued → running → (needs_input ⇄ running) → completed | failed | cancelled | superseded`. A spec revision supersedes queued and running jobs from older revisions.
-- `needs_input`: the planner can pause and ask the thesis owner a question when the subject is ambiguous (for example which of two similarly named companies is the target, or whether a subsidiary counts as the candidate). The question is answered via `POST /v1/evaluations/:id/answer`.
+- `needs_input`: the planner can pause and ask the thesis owner a question when the subject is ambiguous (for example which of two similarly named companies is the target, or whether a subsidiary counts as a named party). The question is answered via `POST /v1/evaluations/:id/answer`.
 - Leased execution with RFC-003 fencing. Commit is one transaction: version or EvaluationRecord, ReviewPacket, `head` pointer unchanged (only approval moves it), and the outbox intent (if any).
 - Idempotency key: `(thesis_id, spec_revision, clock, hash(evidence_set))`. A re-delivered batch or a reaped-and-reclaimed job cannot produce a second version for the same inputs.
 - Retries survive restarts and honor provider `Retry-After`. A terminal failure never rewrites a committed version.
 
 ### Budget and latency
 
-`budget_usd_per_evaluation` and `max_latency_s` are enforced. Under pressure, the planner degrades in a fixed order that the **template** defines, and logs what it dropped in the ReviewPacket. For `neocloud_deal` (RFC-008):
+`budget_usd_per_evaluation` and `max_latency_s` are enforced. Under pressure, the planner applies the template's `degrade_order` (RFC-009) step by step, and logs what it dropped in the ReviewPacket. The last step is always `hold` (`failed: budget_exceeded`). It never skips the audit.
 
-1. drop `low`-reliability secondary evidence (open-web results, unlisted outlets);
-2. skip re-estimating quantities that are marked affected only through dependency edges;
-3. drop `normal`-reliability news, but never an item behind a `talks:*` signal the head relies on;
-4. hold the job (`failed: budget_exceeded`).
+Example (`neocloud_deal`): drop `low`-reliability secondary evidence → skip dependency-only re-estimates → drop `normal`-reliability news not behind a `talks:*` signal the head relies on → hold. `high`-reliability news is never dropped, because for private neoclouds it is often the only evidence of reported talks or financing.
 
-`high`-reliability news is never dropped, because for private neoclouds it is often the only evidence of reported talks or financing.
-
-It never skips the audit.
-
-> Trade-off: fixing the degrade order per template makes cost overruns predictable and visible to reviewers. It rules out smarter per-case trade-offs a planner could make on its own. Keeping trusted news over dependency-only re-estimates reflects where the signal is for private targets.
+> Trade-off: fixing the degrade order per template makes cost overruns predictable and visible to reviewers. It rules out smarter per-case trade-offs a planner could make on its own.
 
 ## Open questions
 
 - The log-odds threshold's `logit_abs` and `prob_abs_min` interact. Should the floor scale with the base rate instead of being a constant?
-- Should a scheduled re-estimate also fire relative to the horizon end (for example 30 days before), not only after 30 idle days?
-- Debounce and resolution latency: is skipping the debounce for resolution-class evidence enough, or do some events (a strategic-review announcement, credible reported talks) need to skip it too?
+- Should a scheduled re-estimate also be able to fire relative to a template date (for example 30 days before a horizon end or an outside date), not only after idle days?
+- Debounce and resolution latency: is skipping the debounce for resolution-class evidence enough, or should templates be able to mark other high-urgency evidence to skip it too?
